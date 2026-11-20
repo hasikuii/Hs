@@ -17,6 +17,18 @@
     <string name="workspace_menu_refresh_desc">Làm mới danh sách</string>
     <string name="workspace_menu_cd_desc">Đồng bộ cd trong terminal</string>
     <string name="workspace_menu_more_desc">Tùy chọn thêm</string>
+    <string name="workspace_menu_action_move">Di chuyển (%d)</string>
+    <string name="workspace_menu_move_to">Di chuyển đến…</string>
+    <string name="workspace_move_title_single">Di chuyển \"%1$s\"</string>
+    <string name="workspace_move_title_multi">Di chuyển %1$d mục đã chọn</string>
+    <string name="workspace_move_here">Chuyển vào đây</string>
+    <string name="workspace_move_same_dir">Mục đã nằm trong thư mục này rồi</string>
+    <string name="workspace_move_into_self">Không thể di chuyển thư mục vào chính nó hoặc thư mục con</string>
+    <string name="workspace_move_success">Đã di chuyển %1$d mục tới %2$s</string>
+    <string name="workspace_move_partial">Đã di chuyển %1$d/%2$d mục (%3$d bỏ qua hoặc lỗi)</string>
+    <string name="workspace_move_conflict">Tên \"%1$s\" đã tồn tại ở thư mục đích</string>
+    <string name="workspace_move_empty_dirs">Không có thư mục con</string>
+    <string name="workspace_move_new_folder_hint">ten_thu_muc_moi</string>
 
     <!-- Tree Creator -->
     <string name="tree_creator_title">Tạo cấu trúc từ sơ đồ cây</string>
@@ -56,4 +68,37 @@
     <string name="editor_replaced_count">Đã thay thế %1$d vị trí</string>
     <string name="editor_close_tab_desc">Đóng tab</string>
     <string name="editor_back_desc">Quay lại Terminal</string>
+
+    <!-- ZArchiver / RAR & Clipboard -->
+    <string name="workspace_menu_action_drive">Google Drive</string>
+    <string name="workspace_menu_action_copy">Sao chép (%d)</string>
+    <string name="workspace_menu_action_compress">Nén (%d)</string>
+    <string name="workspace_clipboard_copy_info">Đang sao chép %1$d mục</string>
+    <string name="workspace_clipboard_cut_info">Đang di chuyển %1$d mục</string>
+    <string name="workspace_clipboard_paste">Dán tại đây</string>
+    <string name="workspace_archive_compress_title">Nén thành tệp lưu trữ</string>
+    <string name="workspace_archive_extract_here">Giải nén tại đây</string>
+    <string name="workspace_archive_extract_subfolder">Giải nén vào \"%1$s/\"</string>
+    <string name="workspace_archive_extract_to">Giải nén đến…</string>
+    <string name="workspace_archive_view">Xem nội dung file nén</string>
+    <string name="workspace_item_copy">Sao chép</string>
+    <string name="workspace_item_cut">Cắt (Di chuyển)</string>
+    <string name="workspace_item_copy_to">Sao chép đến…</string>
+    <string name="workspace_item_duplicate">Tạo bản sao nhanh</string>
+    <string name="workspace_item_compress">Nén (ZIP / TAR.GZ / TAR)…</string>
+    <string name="workspace_item_copy_path">Sao chép đường dẫn</string>
+    <string name="workspace_item_details">Chi tiết &amp; dung lượng</string>
+
+    <!-- Google Drive Manager -->
+    <string name="drive_title">Google Drive</string>
+    <string name="drive_not_connected">Chưa kết nối tài khoản Google</string>
+    <string name="drive_connect_btn">Kết nối</string>
+    <string name="drive_disconnect_btn">Ngắt kết nối</string>
+    <string name="drive_backup_folder_zip">Sao lưu thư mục (.zip)</string>
+    <string name="drive_upload_files_folders">Upload tệp / thư mục</string>
+    <string name="drive_new_folder">+ Thư mục Drive</string>
+    <string name="drive_search_hint">Tìm kiếm trên Google Drive…</string>
+    <string name="drive_empty_prompt">Thư mục Drive trống hoặc chưa kết nối.</string>
+    <string name="drive_download_selected">Tải về (%d)</string>
+    <string name="drive_delete_selected">Xóa (%d)</string>
 </resources>

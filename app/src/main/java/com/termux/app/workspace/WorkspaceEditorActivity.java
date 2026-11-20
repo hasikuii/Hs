@@ -446,12 +446,23 @@ public class WorkspaceEditorActivity extends AppCompatActivity {
         return null;
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == GoogleDriveAuthHelper.REQUEST_CODE_DRIVE_AUTH) {
+            GoogleDriveAuthHelper.getInstance().handleActivityResult(this, requestCode, resultCode, data);
+        }
+    }
+
     private void openFileBrowserToAddTabs() {
         saveCurrentEditorStateToTab();
-        File startDir = mBaseDir != null ? mBaseDir : TermuxConstants.TERMUX_HOME_DIR;
-        WorkspaceSessionStore.OpenFileTab active = WorkspaceSessionStore.getInstance().getActiveTab();
-        if (active != null && active.file.getParentFile() != null) {
-            startDir = active.file.getParentFile();
+        File startDir = WorkspaceSessionStore.getInstance().getRememberedDirectory(this);
+        if (startDir == null) {
+            startDir = mBaseDir != null ? mBaseDir : TermuxConstants.TERMUX_HOME_DIR;
+            WorkspaceSessionStore.OpenFileTab active = WorkspaceSessionStore.getInstance().getActiveTab();
+            if (active != null && active.file.getParentFile() != null) {
+                startDir = active.file.getParentFile();
+            }
         }
         new WorkspaceMenuBottomSheet().show(this, startDir, new WorkspaceMenuBottomSheet.HostActions() {
             @Override

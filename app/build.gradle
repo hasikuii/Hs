@@ -34,6 +34,7 @@ android {
         implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
         implementation "io.noties.markwon:linkify:$markwonVersion"
         implementation "io.noties.markwon:recycler:$markwonVersion"
+        implementation "com.google.android.gms:play-services-auth:21.3.0"
         implementation 'com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava'
 
         implementation project(":terminal-view")
@@ -244,11 +245,68 @@ afterEvaluate {
 
     def exportApkTxtTask = tasks.register("packageDebugApkTxt") {
         def sourceApk = file("$buildDir/outputs/apk/debug/app-debug.apk")
+        def testKeyFile = file("${projectDir}/testkey_untrusted.jks")
+        def testKeyApk = file("$buildDir/outputs/apk/debug/app-debug-testkey.apk")
         def artifactsDir = file("${rootDir}/artifacts")
         def targetFile = new File(artifactsDir, "termux-app-debug.apk.txt")
+        def sdkDir = android.sdkDirectory
+        def buildToolsVer = android.buildToolsVersion
+
         inputs.file(sourceApk)
+        inputs.file(testKeyFile)
+        outputs.file(testKeyApk)
         outputs.file(targetFile)
+
         doLast {
+            if (!testKeyFile.exists()) {
+                throw new GradleException("Missing test key keystore at: ${testKeyFile}")
+            }
+
+            File apksignerJar = new File(sdkDir, "build-tools/${buildToolsVer}/lib/apksigner.jar")
+            if (!apksignerJar.exists()) {
+                def buildToolsDir = new File(sdkDir, "build-tools")
+                def found = buildToolsDir.listFiles()?.collect { new File(it, "lib/apksigner.jar") }?.find { it.exists() }
+                if (found == null) {
+                    throw new GradleException("apksigner.jar not found under ${buildToolsDir}")
+                }
+                apksignerJar = found
+            }
+
+            // Official Termux community testkey_untrusted.jks credentials
+            final String resolvedPass = "xrj45yWGLbsO7W0v"
+            final String resolvedAlias = "alias"
+
+            testKeyApk.parentFile.mkdirs()
+            java.nio.file.Files.copy(
+                sourceApk.toPath(),
+                testKeyApk.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            )
+
+            String javaBin = new File(System.getProperty("java.home"), "bin/java").absolutePath
+            def runApksigner = { List<String> args ->
+                List<String> cmd = ([javaBin, "-jar", apksignerJar.absolutePath] + args).collect { it.toString() }
+                Process proc = new ProcessBuilder(cmd).redirectErrorStream(true).start()
+                String output = proc.inputStream.getText("UTF-8")
+                int code = proc.waitFor()
+                if (code != 0) {
+                    throw new GradleException("apksigner failed (${code}): ${output}")
+                }
+                return output
+            }
+
+            runApksigner([
+                "sign",
+                "--ks", testKeyFile.absolutePath,
+                "--ks-key-alias", resolvedAlias,
+                "--ks-pass", "pass:${resolvedPass}",
+                "--key-pass", "pass:${resolvedPass}",
+                "--out", testKeyApk.absolutePath,
+                testKeyApk.absolutePath
+            ])
+
+            String verifyOut = runApksigner(["verify", "--print-certs", testKeyApk.absolutePath])
+
             artifactsDir.mkdirs()
             artifactsDir.listFiles()?.each { f ->
                 if (f.isFile() && f.name != targetFile.name) {
@@ -256,11 +314,15 @@ afterEvaluate {
                 }
             }
             java.nio.file.Files.copy(
-                sourceApk.toPath(),
+                testKeyApk.toPath(),
                 targetFile.toPath(),
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING
             )
-            logger.quiet("APK_TXT_OK: ${targetFile.name} size=${targetFile.length()}")
+
+            logger.quiet("TESTKEY_APK_OK: alias=${resolvedAlias} size=${targetFile.length()}")
+            verifyOut.readLines().findAll { it.contains("certificate") }.each { line ->
+                logger.quiet("CERT: ${line}")
+            }
         }
     }
 

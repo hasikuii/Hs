@@ -31,9 +31,11 @@ import com.termux.app.api.file.FileReceiverActivity;
 import com.termux.app.terminal.TermuxActivityRootView;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
+import com.termux.app.workspace.GoogleDriveAuthHelper;
 import com.termux.app.workspace.TreeCreatorBottomSheet;
 import com.termux.app.workspace.WorkspaceEditorActivity;
 import com.termux.app.workspace.WorkspaceMenuBottomSheet;
+import com.termux.app.workspace.WorkspaceSessionStore;
 import com.termux.shared.activities.ReportActivity;
 import com.termux.shared.activity.ActivityUtils;
 import com.termux.shared.activity.media.AppCompatActivityUtils;
@@ -807,6 +809,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             if (runCmd != null && !runCmd.isEmpty() && session != null && session.isRunning()) {
                 session.write(runCmd + "\r");
             }
+        } else if (requestCode == GoogleDriveAuthHelper.REQUEST_CODE_DRIVE_AUTH) {
+            GoogleDriveAuthHelper.getInstance().handleActivityResult(this, requestCode, resultCode, data);
         }
     }
 
@@ -1032,7 +1036,8 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     public void showWorkspaceMenuBottomSheet() {
-        File cwd = getCurrentWorkingDirectory();
+        File remembered = WorkspaceSessionStore.getInstance().getRememberedDirectory(this);
+        File cwd = remembered != null ? remembered : getCurrentWorkingDirectory();
         new WorkspaceMenuBottomSheet().show(this, cwd, new WorkspaceMenuBottomSheet.HostActions() {
             @Override
             public void onOpenFilesInBatchEditor(@NonNull List<File> files, @NonNull File currentDir) {

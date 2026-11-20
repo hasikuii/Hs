@@ -71,12 +71,12 @@ jobs:
 
           ./gradlew :app:assembleDebug --no-daemon
 
-          if [ ! -f "$APK_DIR_PATH/app-debug.apk" ]; then
-            echo "Failed to find built APK at '$APK_DIR_PATH/app-debug.apk'"
+          if [ ! -f "$APK_DIR_PATH/app-debug-testkey.apk" ]; then
+            echo "Failed to find built testkey APK at '$APK_DIR_PATH/app-debug-testkey.apk'"
             exit 1
           fi
 
-          cp "$APK_DIR_PATH/app-debug.apk" "$APK_DIR_PATH/$APK_OUTPUT_NAME"
+          cp "$APK_DIR_PATH/app-debug-testkey.apk" "$APK_DIR_PATH/$APK_OUTPUT_NAME"
           (cd "$APK_DIR_PATH" && sha256sum "$APK_OUTPUT_NAME" > "${APK_BASENAME_PREFIX}_sha256sums")
 
           gh release upload "$RELEASE_TAG" \

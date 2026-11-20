@@ -1,8 +1,11 @@
 package com.termux.app.workspace;
 
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Color;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
@@ -18,7 +21,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -38,11 +40,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Extra-key Workspace Menu displaying the files and folders in the current directory,
- * supporting tap-to-open, Pydroid-style multi-file batch selection & editing,
- * and quick creation via pasted tree diagrams.
+ * supporting remembered folder persistence, ZArchiver/RAR file & archive operations,
+ * Pydroid-style multi-file batch editing, pasted tree diagrams, and Google Drive backup/sync.
  */
 public final class WorkspaceMenuBottomSheet {
 
@@ -57,6 +61,26 @@ public final class WorkspaceMenuBottomSheet {
         void onMoreClick(@NonNull View anchor, @NonNull File item);
     }
 
+    private static final int MENU_OPEN = 1;
+    private static final int MENU_TREE = 2;
+    private static final int MENU_CD = 3;
+    private static final int MENU_RENAME = 4;
+    private static final int MENU_DELETE = 5;
+    private static final int MENU_MOVE_TO = 6;
+    private static final int MENU_COPY = 7;
+    private static final int MENU_CUT = 8;
+    private static final int MENU_COPY_TO = 9;
+    private static final int MENU_ARCHIVE_VIEW = 10;
+    private static final int MENU_ARCHIVE_EXTRACT_HERE = 11;
+    private static final int MENU_ARCHIVE_EXTRACT_SUB = 12;
+    private static final int MENU_DUPLICATE = 13;
+    private static final int MENU_COMPRESS = 14;
+    private static final int MENU_COPY_PATH = 15;
+    private static final int MENU_DETAILS = 16;
+
+    private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+
     private File mCurrentDir;
     private final List<File> mAllEntries = new ArrayList<>();
     private final List<File> mFilteredEntries = new ArrayList<>();
@@ -64,15 +88,16 @@ public final class WorkspaceMenuBottomSheet {
     private boolean mBatchSelectMode = false;
     private String mFilterQuery = "";
 
-    public void show(@NonNull Context context, @NonNull File initialDir, @NonNull HostActions hostActions) {
+    public void show(@NonNull Activity activity, @NonNull File initialDir, @NonNull HostActions hostActions) {
+        WorkspaceSessionStore store = WorkspaceSessionStore.getInstance();
         mCurrentDir = initialDir.isDirectory() ? initialDir : TermuxConstants.TERMUX_HOME_DIR;
         if (!mCurrentDir.exists()) {
-            mCurrentDir = context.getFilesDir();
+            mCurrentDir = activity.getFilesDir();
         }
-        WorkspaceSessionStore.getInstance().setCurrentDirectory(mCurrentDir);
+        store.setCurrentDirectory(activity, mCurrentDir);
 
-        BottomSheetDialog dialog = new BottomSheetDialog(context, R.style.Theme_WorkspaceBottomSheet);
-        View root = LayoutInflater.from(context).inflate(R.layout.bottom_sheet_workspace_menu, null);
+        BottomSheetDialog dialog = new BottomSheetDialog(activity, R.style.Theme_WorkspaceBottomSheet);
+        View root = LayoutInflater.from(activity).inflate(R.layout.bottom_sheet_workspace_menu, null);
         dialog.setContentView(root);
         dialog.getBehavior().setState(BottomSheetBehavior.STATE_EXPANDED);
         dialog.getBehavior().setSkipCollapsed(true);
@@ -86,26 +111,70 @@ public final class WorkspaceMenuBottomSheet {
         MaterialButton treeBtn = root.findViewById(R.id.btn_open_tree_creator);
         MaterialButton batchToggleBtn = root.findViewById(R.id.btn_batch_select_toggle);
         MaterialButton newFileBtn = root.findViewById(R.id.btn_new_file);
+        MaterialButton driveBtn = root.findViewById(R.id.btn_open_google_drive);
         MaterialButton newFolderBtn = root.findViewById(R.id.btn_new_folder);
 
         EditText searchInput = root.findViewById(R.id.workspace_search_input);
         RecyclerView recyclerView = root.findViewById(R.id.workspace_file_list);
         View emptyView = root.findViewById(R.id.workspace_empty_view);
+
+        LinearLayout clipboardBar = root.findViewById(R.id.workspace_clipboard_bar);
+        TextView clipboardText = root.findViewById(R.id.workspace_clipboard_text);
+        MaterialButton clipboardClearBtn = root.findViewById(R.id.btn_clipboard_clear);
+        MaterialButton clipboardPasteBtn = root.findViewById(R.id.btn_clipboard_paste);
+
         LinearLayout batchBar = root.findViewById(R.id.workspace_batch_bar);
         MaterialButton batchClearBtn = root.findViewById(R.id.btn_batch_clear);
+        MaterialButton copyBatchBtn = root.findViewById(R.id.btn_copy_selected_batch);
+        MaterialButton moveBatchBtn = root.findViewById(R.id.btn_move_selected_batch);
+        MaterialButton compressBatchBtn = root.findViewById(R.id.btn_compress_selected_batch);
         MaterialButton openBatchBtn = root.findViewById(R.id.btn_open_selected_batch);
 
         FileAdapter adapter = new FileAdapter();
-        recyclerView.setLayoutManager(new LinearLayoutManager(context));
+        recyclerView.setLayoutManager(new LinearLayoutManager(activity));
         recyclerView.setAdapter(adapter);
 
+        Runnable updateClipboardBar = () -> {
+            WorkspaceSessionStore.ClipboardMode mode = store.getClipboardMode();
+            List<File> clipItems = store.getClipboardItems();
+            if (mode == WorkspaceSessionStore.ClipboardMode.NONE || clipItems.isEmpty()) {
+                clipboardBar.setVisibility(View.GONE);
+            } else {
+                clipboardBar.setVisibility(View.VISIBLE);
+                int resId = mode == WorkspaceSessionStore.ClipboardMode.COPY
+                    ? R.string.workspace_clipboard_copy_info
+                    : R.string.workspace_clipboard_cut_info;
+                clipboardText.setText(activity.getString(resId, clipItems.size()));
+            }
+        };
+
         Runnable updateBatchBar = () -> {
-            int count = mSelectedFilePaths.size();
-            if (count > 0 || mBatchSelectMode) {
+            int totalCount = mSelectedFilePaths.size();
+            int editableFileCount = 0;
+            for (String path : mSelectedFilePaths) {
+                File f = new File(path);
+                if (f.exists() && f.isFile()) {
+                    editableFileCount++;
+                }
+            }
+            if (totalCount > 0 || mBatchSelectMode) {
                 batchBar.setVisibility(View.VISIBLE);
-                if (count > 0) {
+                boolean hasSelection = totalCount > 0;
+                copyBatchBtn.setEnabled(hasSelection);
+                moveBatchBtn.setEnabled(hasSelection);
+                compressBatchBtn.setEnabled(hasSelection);
+                if (hasSelection) {
+                    copyBatchBtn.setText(activity.getString(R.string.workspace_menu_action_copy, totalCount));
+                    moveBatchBtn.setText(activity.getString(R.string.workspace_menu_action_move, totalCount));
+                    compressBatchBtn.setText(activity.getString(R.string.workspace_menu_action_compress, totalCount));
+                } else {
+                    copyBatchBtn.setText(R.string.workspace_item_copy);
+                    moveBatchBtn.setText(R.string.workspace_menu_move_to);
+                    compressBatchBtn.setText(R.string.workspace_item_compress);
+                }
+                if (editableFileCount > 0) {
                     openBatchBtn.setEnabled(true);
-                    openBatchBtn.setText(context.getString(R.string.workspace_menu_action_open_batch, count));
+                    openBatchBtn.setText(activity.getString(R.string.workspace_menu_action_open_batch, editableFileCount));
                 } else {
                     openBatchBtn.setEnabled(false);
                     openBatchBtn.setText(R.string.workspace_menu_action_open_selected_none);
@@ -118,12 +187,13 @@ public final class WorkspaceMenuBottomSheet {
 
         Runnable reloadDirectory = () -> {
             pathText.setText(mCurrentDir.getAbsolutePath());
-            WorkspaceSessionStore.getInstance().setCurrentDirectory(mCurrentDir);
+            store.setCurrentDirectory(activity, mCurrentDir);
             loadDirectoryEntries();
             applyFilter();
             adapter.notifyDataSetChanged();
             emptyView.setVisibility(mFilteredEntries.isEmpty() ? View.VISIBLE : View.GONE);
             updateBatchBar.run();
+            updateClipboardBar.run();
         };
 
         adapter.setListener(new FileItemListener() {
@@ -134,28 +204,30 @@ public final class WorkspaceMenuBottomSheet {
                     mFilterQuery = "";
                     searchInput.setText("");
                     reloadDirectory.run();
-                } else {
-                    if (mBatchSelectMode) {
-                        toggleSelection(item);
-                        adapter.notifyDataSetChanged();
-                        updateBatchBar.run();
-                    } else {
+                } else if (mBatchSelectMode) {
+                    toggleSelection(item);
+                    adapter.notifyDataSetChanged();
+                    updateBatchBar.run();
+                } else if (WorkspaceArchiveHelper.isArchiveFile(item)) {
+                    WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, item, mCurrentDir, reloadDirectory, () -> {
                         dialog.dismiss();
                         hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), mCurrentDir);
-                    }
+                    });
+                } else {
+                    dialog.dismiss();
+                    hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), mCurrentDir);
                 }
             }
 
             @Override
             public void onCheckboxToggle(@NonNull File item) {
-                if (item.isDirectory()) return;
                 toggleSelection(item);
                 updateBatchBar.run();
             }
 
             @Override
             public void onMoreClick(@NonNull View anchor, @NonNull File item) {
-                showItemPopupMenu(context, anchor, item, dialog, hostActions, reloadDirectory);
+                showItemPopupMenu(activity, anchor, item, dialog, hostActions, reloadDirectory, updateClipboardBar);
             }
         });
 
@@ -174,21 +246,22 @@ public final class WorkspaceMenuBottomSheet {
 
         cdBtn.setOnClickListener(v -> {
             hostActions.onSendCdCommandToTerminal(mCurrentDir);
-            Toast.makeText(context, context.getString(R.string.workspace_menu_cd_synced, mCurrentDir.getAbsolutePath()), Toast.LENGTH_SHORT).show();
+            Toast.makeText(activity, activity.getString(R.string.workspace_menu_cd_synced, mCurrentDir.getAbsolutePath()), Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });
 
         refreshBtn.setOnClickListener(v -> reloadDirectory.run());
 
-        treeBtn.setOnClickListener(v -> {
-            new TreeCreatorBottomSheet().show(context, mCurrentDir, (dir, createdFiles, openInEditor) -> {
+        treeBtn.setOnClickListener(v ->
+            new TreeCreatorBottomSheet().show(activity, mCurrentDir, (dir, createdFiles, openInEditor) -> {
                 reloadDirectory.run();
                 if (openInEditor && !createdFiles.isEmpty()) {
                     dialog.dismiss();
                     hostActions.onOpenFilesInBatchEditor(createdFiles, mCurrentDir);
                 }
-            });
-        });
+            }));
+
+        driveBtn.setOnClickListener(v -> new GoogleDriveManagerSheet().show(activity, mCurrentDir, reloadDirectory));
 
         batchToggleBtn.setOnClickListener(v -> {
             mBatchSelectMode = !mBatchSelectMode;
@@ -199,7 +272,7 @@ public final class WorkspaceMenuBottomSheet {
             adapter.notifyDataSetChanged();
         });
 
-        newFileBtn.setOnClickListener(v -> promptCreateName(context, "Tạo tệp mới", "example.py", name -> {
+        newFileBtn.setOnClickListener(v -> promptCreateName(activity, "Tạo tệp mới", "example.py", name -> {
             File target = new File(mCurrentDir, name);
             try {
                 if (target.exists() || target.createNewFile()) {
@@ -208,14 +281,14 @@ public final class WorkspaceMenuBottomSheet {
                     hostActions.onOpenFilesInBatchEditor(Collections.singletonList(target), mCurrentDir);
                 }
             } catch (IOException e) {
-                Toast.makeText(context, "Lỗi tạo tệp: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                Toast.makeText(activity, "Lỗi tạo tệp: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             }
         }));
 
-        newFolderBtn.setOnClickListener(v -> promptCreateName(context, "Tạo thư mục mới", "new_folder", name -> {
+        newFolderBtn.setOnClickListener(v -> promptCreateName(activity, "Tạo thư mục mới", "new_folder", name -> {
             File target = new File(mCurrentDir, name);
             if (!target.exists() && !target.mkdirs()) {
-                Toast.makeText(context, "Không thể tạo thư mục", Toast.LENGTH_SHORT).show();
+                Toast.makeText(activity, "Không thể tạo thư mục", Toast.LENGTH_SHORT).show();
             } else {
                 reloadDirectory.run();
             }
@@ -237,11 +310,89 @@ public final class WorkspaceMenuBottomSheet {
             }
         });
 
+        clipboardClearBtn.setOnClickListener(v -> {
+            store.clearClipboard();
+            updateClipboardBar.run();
+        });
+
+        clipboardPasteBtn.setOnClickListener(v -> {
+            WorkspaceSessionStore.ClipboardMode mode = store.getClipboardMode();
+            List<File> items = store.getClipboardItems();
+            if (mode == WorkspaceSessionStore.ClipboardMode.NONE || items.isEmpty()) {
+                updateClipboardBar.run();
+                return;
+            }
+            File destDir = mCurrentDir;
+            Toast.makeText(activity, "Đang xử lý " + items.size() + " mục…", Toast.LENGTH_SHORT).show();
+            mExecutor.execute(() -> {
+                if (mode == WorkspaceSessionStore.ClipboardMode.COPY) {
+                    WorkspaceArchiveHelper.CopyResult res = WorkspaceArchiveHelper.copyItems(items, destDir, true);
+                    mMainHandler.post(() -> {
+                        if (res.copiedCount > 0) {
+                            store.clearClipboard();
+                            Toast.makeText(activity, "Đã dán " + res.copiedCount + " mục", Toast.LENGTH_SHORT).show();
+                            reloadDirectory.run();
+                        } else {
+                            Toast.makeText(activity, res.lastError != null ? res.lastError : "Không thể dán", Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } else {
+                    WorkspaceMoveHelper.MoveResult res = WorkspaceMoveHelper.moveItems(activity, items, destDir);
+                    mMainHandler.post(() -> {
+                        if (res.movedCount > 0) {
+                            store.clearClipboard();
+                            Toast.makeText(activity, activity.getString(R.string.workspace_move_success, res.movedCount, destDir.getName()), Toast.LENGTH_SHORT).show();
+                            reloadDirectory.run();
+                        } else {
+                            Toast.makeText(activity, res.lastError != null ? res.lastError : "Không thể di chuyển", Toast.LENGTH_LONG).show();
+                        }
+                    });
+                }
+            });
+        });
+
         batchClearBtn.setOnClickListener(v -> {
             mSelectedFilePaths.clear();
             mBatchSelectMode = false;
             adapter.notifyDataSetChanged();
             updateBatchBar.run();
+        });
+
+        copyBatchBtn.setOnClickListener(v -> {
+            List<File> selected = collectSelectedEntries();
+            if (!selected.isEmpty()) {
+                store.setClipboard(WorkspaceSessionStore.ClipboardMode.COPY, selected);
+                mSelectedFilePaths.clear();
+                mBatchSelectMode = false;
+                adapter.notifyDataSetChanged();
+                updateBatchBar.run();
+                updateClipboardBar.run();
+                Toast.makeText(activity,
+                    "Đã chép " + selected.size() + " mục — mở thư mục đích và bấm Dán tại đây",
+                    Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        moveBatchBtn.setOnClickListener(v -> {
+            List<File> toMove = collectSelectedEntries();
+            if (!toMove.isEmpty()) {
+                WorkspaceMoveHelper.showDestinationPicker(activity, toMove, mCurrentDir, (targetDir, movedCount) -> {
+                    mSelectedFilePaths.clear();
+                    mBatchSelectMode = false;
+                    reloadDirectory.run();
+                });
+            }
+        });
+
+        compressBatchBtn.setOnClickListener(v -> {
+            List<File> toCompress = collectSelectedEntries();
+            if (!toCompress.isEmpty()) {
+                WorkspaceArchiveDialogs.showCompressDialog(activity, toCompress, mCurrentDir, () -> {
+                    mSelectedFilePaths.clear();
+                    mBatchSelectMode = false;
+                    reloadDirectory.run();
+                });
+            }
         });
 
         openBatchBtn.setOnClickListener(v -> {
@@ -262,6 +413,18 @@ public final class WorkspaceMenuBottomSheet {
         dialog.show();
     }
 
+    @NonNull
+    private List<File> collectSelectedEntries() {
+        List<File> list = new ArrayList<>();
+        for (String path : mSelectedFilePaths) {
+            File f = new File(path);
+            if (f.exists()) {
+                list.add(f);
+            }
+        }
+        return list;
+    }
+
     private void toggleSelection(@NonNull File file) {
         String path = file.getAbsolutePath();
         if (mSelectedFilePaths.contains(path)) {
@@ -275,9 +438,7 @@ public final class WorkspaceMenuBottomSheet {
         mAllEntries.clear();
         File[] children = mCurrentDir.listFiles();
         if (children == null) return;
-        for (File child : children) {
-            mAllEntries.add(child);
-        }
+        Collections.addAll(mAllEntries, children);
         Collections.sort(mAllEntries, (a, b) -> {
             if (a.isDirectory() != b.isDirectory()) {
                 return a.isDirectory() ? -1 : 1;
@@ -299,29 +460,44 @@ public final class WorkspaceMenuBottomSheet {
         }
     }
 
-    private void showItemPopupMenu(@NonNull Context context, @NonNull View anchor, @NonNull File item,
+    private void showItemPopupMenu(@NonNull Activity activity, @NonNull View anchor, @NonNull File item,
                                    @NonNull BottomSheetDialog parentDialog, @NonNull HostActions hostActions,
-                                   @NonNull Runnable reloadDirectory) {
-        PopupMenu popup = new PopupMenu(context, anchor);
+                                   @NonNull Runnable reloadDirectory, @NonNull Runnable updateClipboardBar) {
+        PopupMenu popup = new PopupMenu(activity, anchor);
+        int order = 0;
         if (item.isDirectory()) {
-            popup.getMenu().add(0, 1, 0, "Mở sửa tất cả tệp bên trong");
-            popup.getMenu().add(0, 2, 1, "Dán sơ đồ cây vào thư mục này");
-            popup.getMenu().add(0, 3, 2, "cd vào thư mục trong Terminal");
-            popup.getMenu().add(0, 4, 3, "Đổi tên");
-            popup.getMenu().add(0, 5, 4, "Xóa");
+            popup.getMenu().add(0, MENU_OPEN, order++, "Mở sửa tất cả tệp bên trong");
+            popup.getMenu().add(0, MENU_TREE, order++, "Dán sơ đồ cây vào thư mục này");
+            popup.getMenu().add(0, MENU_CD, order++, "cd vào thư mục trong Terminal");
         } else {
-            popup.getMenu().add(0, 1, 0, "Mở chỉnh sửa");
-            popup.getMenu().add(0, 4, 1, "Đổi tên");
-            popup.getMenu().add(0, 5, 2, "Xóa");
+            if (WorkspaceArchiveHelper.isArchiveFile(item)) {
+                popup.getMenu().add(0, MENU_ARCHIVE_VIEW, order++, R.string.workspace_archive_view);
+                popup.getMenu().add(0, MENU_ARCHIVE_EXTRACT_HERE, order++, R.string.workspace_archive_extract_here);
+                popup.getMenu().add(0, MENU_ARCHIVE_EXTRACT_SUB, order++,
+                    activity.getString(R.string.workspace_archive_extract_subfolder,
+                        WorkspaceArchiveHelper.stripArchiveExtension(item.getName())));
+            }
+            popup.getMenu().add(0, MENU_OPEN, order++, "Mở chỉnh sửa văn bản");
         }
+        popup.getMenu().add(0, MENU_COPY, order++, R.string.workspace_item_copy);
+        popup.getMenu().add(0, MENU_CUT, order++, R.string.workspace_item_cut);
+        popup.getMenu().add(0, MENU_COPY_TO, order++, R.string.workspace_item_copy_to);
+        popup.getMenu().add(0, MENU_MOVE_TO, order++, R.string.workspace_menu_move_to);
+        popup.getMenu().add(0, MENU_DUPLICATE, order++, R.string.workspace_item_duplicate);
+        popup.getMenu().add(0, MENU_COMPRESS, order++, R.string.workspace_item_compress);
+        popup.getMenu().add(0, MENU_RENAME, order++, "Đổi tên");
+        popup.getMenu().add(0, MENU_COPY_PATH, order++, R.string.workspace_item_copy_path);
+        popup.getMenu().add(0, MENU_DETAILS, order++, R.string.workspace_item_details);
+        popup.getMenu().add(0, MENU_DELETE, order, "Xóa");
 
+        WorkspaceSessionStore store = WorkspaceSessionStore.getInstance();
         popup.setOnMenuItemClickListener(menuItem -> {
             int id = menuItem.getItemId();
-            if (id == 1) {
+            if (id == MENU_OPEN) {
                 if (item.isDirectory()) {
                     List<File> files = collectEditableFiles(item, 25);
                     if (files.isEmpty()) {
-                        Toast.makeText(context, "Không có tệp nào trong thư mục này", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(activity, "Không có tệp nào trong thư mục này", Toast.LENGTH_SHORT).show();
                     } else {
                         parentDialog.dismiss();
                         hostActions.onOpenFilesInBatchEditor(files, item);
@@ -331,8 +507,8 @@ public final class WorkspaceMenuBottomSheet {
                     hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), mCurrentDir);
                 }
                 return true;
-            } else if (id == 2 && item.isDirectory()) {
-                new TreeCreatorBottomSheet().show(context, item, (dir, createdFiles, openInEditor) -> {
+            } else if (id == MENU_TREE && item.isDirectory()) {
+                new TreeCreatorBottomSheet().show(activity, item, (dir, createdFiles, openInEditor) -> {
                     reloadDirectory.run();
                     if (openInEditor && !createdFiles.isEmpty()) {
                         parentDialog.dismiss();
@@ -340,29 +516,91 @@ public final class WorkspaceMenuBottomSheet {
                     }
                 });
                 return true;
-            } else if (id == 3 && item.isDirectory()) {
+            } else if (id == MENU_CD && item.isDirectory()) {
                 hostActions.onSendCdCommandToTerminal(item);
                 parentDialog.dismiss();
                 return true;
-            } else if (id == 4) {
-                promptCreateName(context, "Đổi tên", item.getName(), newName -> {
-                    File dest = new File(item.getParentFile(), newName);
-                    if (item.renameTo(dest)) {
+            } else if (id == MENU_ARCHIVE_VIEW) {
+                WorkspaceArchiveDialogs.showArchiveContentsDialog(activity, item, mCurrentDir, reloadDirectory);
+                return true;
+            } else if (id == MENU_ARCHIVE_EXTRACT_HERE) {
+                WorkspaceArchiveDialogs.runExtract(activity, item, mCurrentDir, reloadDirectory);
+                return true;
+            } else if (id == MENU_ARCHIVE_EXTRACT_SUB) {
+                File sub = new File(mCurrentDir, WorkspaceArchiveHelper.stripArchiveExtension(item.getName()));
+                WorkspaceArchiveDialogs.runExtract(activity, item, sub, reloadDirectory);
+                return true;
+            } else if (id == MENU_COPY) {
+                store.setClipboard(WorkspaceSessionStore.ClipboardMode.COPY, Collections.singletonList(item));
+                updateClipboardBar.run();
+                Toast.makeText(activity, "Đã chép \"" + item.getName() + "\" vào bộ nhớ tạm", Toast.LENGTH_SHORT).show();
+                return true;
+            } else if (id == MENU_CUT) {
+                store.setClipboard(WorkspaceSessionStore.ClipboardMode.CUT, Collections.singletonList(item));
+                updateClipboardBar.run();
+                Toast.makeText(activity, "Đã cắt \"" + item.getName() + "\" — chọn thư mục và bấm Dán tại đây", Toast.LENGTH_SHORT).show();
+                return true;
+            } else if (id == MENU_COPY_TO) {
+                WorkspaceMoveHelper.showCopyDestinationPicker(activity, Collections.singletonList(item), mCurrentDir,
+                    (targetDir, copiedCount) -> reloadDirectory.run());
+                return true;
+            } else if (id == MENU_MOVE_TO) {
+                WorkspaceMoveHelper.showDestinationPicker(activity, Collections.singletonList(item), mCurrentDir,
+                    (targetDir, movedCount) -> {
+                        mSelectedFilePaths.remove(item.getAbsolutePath());
                         reloadDirectory.run();
-                    } else {
-                        Toast.makeText(context, "Không thể đổi tên", Toast.LENGTH_SHORT).show();
+                    });
+                return true;
+            } else if (id == MENU_DUPLICATE) {
+                mExecutor.execute(() -> {
+                    try {
+                        File dup = WorkspaceArchiveHelper.duplicateItem(item);
+                        mMainHandler.post(() -> {
+                            if (dup != null) {
+                                Toast.makeText(activity, "Đã tạo bản sao: " + dup.getName(), Toast.LENGTH_SHORT).show();
+                                reloadDirectory.run();
+                            }
+                        });
+                    } catch (IOException e) {
+                        mMainHandler.post(() -> Toast.makeText(activity, "Lỗi tạo bản sao: " + e.getMessage(), Toast.LENGTH_LONG).show());
                     }
                 });
                 return true;
-            } else if (id == 5) {
-                new AlertDialog.Builder(context)
-                    .setTitle("Xóa " + item.getName() + "?")
-                    .setMessage(item.isDirectory() ? "Thư mục và toàn bộ nội dung bên trong sẽ bị xóa." : "Tệp này sẽ bị xóa vĩnh viễn.")
-                    .setPositiveButton("Xóa", (d, w) -> {
-                        deleteRecursively(item);
+            } else if (id == MENU_COMPRESS) {
+                WorkspaceArchiveDialogs.showCompressDialog(activity, Collections.singletonList(item), mCurrentDir, reloadDirectory);
+                return true;
+            } else if (id == MENU_RENAME) {
+                promptCreateName(activity, "Đổi tên", item.getName(), newName -> {
+                    File dest = new File(item.getParentFile(), newName);
+                    if (dest.exists()) {
+                        Toast.makeText(activity, "Tên \"" + newName + "\" đã tồn tại", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (item.renameTo(dest)) {
                         mSelectedFilePaths.remove(item.getAbsolutePath());
                         reloadDirectory.run();
-                    })
+                    } else {
+                        Toast.makeText(activity, "Không thể đổi tên", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                return true;
+            } else if (id == MENU_COPY_PATH) {
+                WorkspaceArchiveDialogs.copyPathToClipboard(activity, item);
+                return true;
+            } else if (id == MENU_DETAILS) {
+                WorkspaceArchiveDialogs.showDetailsDialog(activity, item);
+                return true;
+            } else if (id == MENU_DELETE) {
+                new AlertDialog.Builder(activity)
+                    .setTitle("Xóa " + item.getName() + "?")
+                    .setMessage(item.isDirectory() ? "Thư mục và toàn bộ nội dung bên trong sẽ bị xóa." : "Tệp này sẽ bị xóa vĩnh viễn.")
+                    .setPositiveButton("Xóa", (d, w) -> mExecutor.execute(() -> {
+                        deleteRecursively(item);
+                        mMainHandler.post(() -> {
+                            mSelectedFilePaths.remove(item.getAbsolutePath());
+                            reloadDirectory.run();
+                        });
+                    }))
                     .setNegativeButton("Hủy", null)
                     .show();
                 return true;
@@ -452,7 +690,12 @@ public final class WorkspaceMenuBottomSheet {
                 holder.icon.setImageResource(R.drawable.ic_workspace_folder);
                 holder.icon.setColorFilter(Color.parseColor("#F59E0B"));
                 holder.extBadge.setVisibility(View.GONE);
-                holder.checkbox.setVisibility(View.GONE);
+                holder.checkbox.setVisibility(mBatchSelectMode ? View.VISIBLE : View.GONE);
+                holder.checkbox.setOnCheckedChangeListener(null);
+                holder.checkbox.setChecked(mSelectedFilePaths.contains(file.getAbsolutePath()));
+                holder.checkbox.setOnCheckedChangeListener((btn, checked) -> {
+                    if (mListener != null) mListener.onCheckboxToggle(file);
+                });
 
                 File[] children = file.listFiles();
                 int count = children == null ? 0 : children.length;
@@ -486,14 +729,11 @@ public final class WorkspaceMenuBottomSheet {
             });
 
             holder.itemView.setOnLongClickListener(v -> {
-                if (!file.isDirectory()) {
-                    mBatchSelectMode = true;
-                    toggleSelection(file);
-                    notifyDataSetChanged();
-                    if (mListener != null) mListener.onCheckboxToggle(file);
-                    return true;
-                }
-                return false;
+                mBatchSelectMode = true;
+                toggleSelection(file);
+                notifyDataSetChanged();
+                if (mListener != null) mListener.onCheckboxToggle(file);
+                return true;
             });
 
             holder.moreBtn.setOnClickListener(v -> {
@@ -549,6 +789,14 @@ public final class WorkspaceMenuBottomSheet {
             case "yaml": return Color.parseColor("#A78BFA");
             case "md":
             case "txt": return Color.parseColor("#9CA3AF");
+            case "zip":
+            case "tar":
+            case "gz":
+            case "tgz":
+            case "rar":
+            case "7z":
+            case "apk":
+            case "jar": return Color.parseColor("#C084FC");
             default: return Color.parseColor("#60A5FA");
         }
     }

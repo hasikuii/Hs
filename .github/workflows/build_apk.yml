@@ -87,9 +87,9 @@ jobs:
 
           ./gradlew :app:assembleDebug --no-daemon
 
-          APK_SRC="./app/build/outputs/apk/debug/app-debug.apk"
+          APK_SRC="./app/build/outputs/apk/debug/app-debug-testkey.apk"
           if [ ! -f "$APK_SRC" ]; then
-            echo "Built APK not found at $APK_SRC"
+            echo "Built testkey APK not found at $APK_SRC"
             exit 1
           fi
 

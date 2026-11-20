@@ -1,5 +1,8 @@
 package com.termux.app.workspace;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -17,12 +20,20 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * In-memory workspace state for Pydroid-style multi-tab batch editing.
- * Keeps open file tabs, unsaved buffers, cursor positions, and per-tab undo/redo stacks.
+ * Workspace state for Pydroid-style multi-tab editing, persistent remembered directory,
+ * and ZArchiver-style Copy/Cut clipboard.
  */
 public final class WorkspaceSessionStore {
 
     public static final int MAX_EDITABLE_FILE_BYTES = 2 * 1024 * 1024; // 2 MB safety guard
+    private static final String PREF_NAME = "termux_workspace_prefs";
+    private static final String KEY_LAST_DIR = "last_opened_dir";
+
+    public enum ClipboardMode {
+        NONE,
+        COPY,
+        CUT
+    }
 
     public static final class OpenFileTab {
         public final File file;
@@ -65,6 +76,8 @@ public final class WorkspaceSessionStore {
     private final List<OpenFileTab> mTabs = new ArrayList<>();
     private int mActiveTabIndex = -1;
     private File mCurrentDirectory;
+    private ClipboardMode mClipboardMode = ClipboardMode.NONE;
+    private final List<File> mClipboardItems = new ArrayList<>();
 
     private WorkspaceSessionStore() {}
 
@@ -77,14 +90,73 @@ public final class WorkspaceSessionStore {
     }
 
     public synchronized void setCurrentDirectory(@Nullable File directory) {
+        setCurrentDirectory(null, directory);
+    }
+
+    public synchronized void setCurrentDirectory(@Nullable Context context, @Nullable File directory) {
         if (directory != null && directory.isDirectory()) {
             mCurrentDirectory = directory;
+            if (context != null) {
+                SharedPreferences prefs = context.getApplicationContext()
+                    .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                prefs.edit().putString(KEY_LAST_DIR, directory.getAbsolutePath()).apply();
+            }
         }
     }
 
     @Nullable
     public synchronized File getCurrentDirectory() {
         return mCurrentDirectory;
+    }
+
+    @Nullable
+    public synchronized File getRememberedDirectory(@NonNull Context context) {
+        if (mCurrentDirectory != null && mCurrentDirectory.exists() && mCurrentDirectory.isDirectory()) {
+            return mCurrentDirectory;
+        }
+        SharedPreferences prefs = context.getApplicationContext()
+            .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        String savedPath = prefs.getString(KEY_LAST_DIR, null);
+        if (savedPath != null && !savedPath.isEmpty()) {
+            File savedDir = new File(savedPath);
+            if (savedDir.exists() && savedDir.isDirectory() && savedDir.canRead()) {
+                mCurrentDirectory = savedDir;
+                return savedDir;
+            }
+        }
+        return null;
+    }
+
+    public synchronized void setClipboard(@NonNull ClipboardMode mode, @NonNull List<File> items) {
+        mClipboardItems.clear();
+        if (mode == ClipboardMode.NONE || items.isEmpty()) {
+            mClipboardMode = ClipboardMode.NONE;
+            return;
+        }
+        mClipboardMode = mode;
+        for (File f : items) {
+            if (f != null && f.exists()) {
+                mClipboardItems.add(f);
+            }
+        }
+        if (mClipboardItems.isEmpty()) {
+            mClipboardMode = ClipboardMode.NONE;
+        }
+    }
+
+    public synchronized void clearClipboard() {
+        mClipboardMode = ClipboardMode.NONE;
+        mClipboardItems.clear();
+    }
+
+    @NonNull
+    public synchronized ClipboardMode getClipboardMode() {
+        return mClipboardMode;
+    }
+
+    @NonNull
+    public synchronized List<File> getClipboardItems() {
+        return new ArrayList<>(mClipboardItems);
     }
 
     @NonNull

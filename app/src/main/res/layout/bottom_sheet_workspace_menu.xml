@@ -150,6 +150,24 @@
                 app:strokeColor="#2E3648" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_open_google_drive"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:minHeight="48dp"
+                android:text="@string/workspace_menu_action_drive"
+                android:textAllCaps="false"
+                android:textColor="#60A5FA"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                app:cornerRadius="10dp"
+                app:icon="@drawable/ic_workspace_drive"
+                app:iconSize="18dp"
+                app:iconTint="#60A5FA"
+                app:strokeColor="#254068" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_new_folder"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
@@ -246,40 +264,165 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- Batch Edit Footer CTA (shown when >= 1 files selected) -->
+    <!-- ZArchiver-style Copy/Cut Clipboard Bar -->
+    <LinearLayout
+        android:id="@+id/workspace_clipboard_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_workspace_card"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginEnd="8dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_workspace_copy"
+            app:tint="#10B981" />
+
+        <TextView
+            android:id="@+id/workspace_clipboard_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="#E6EDF3"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clipboard_clear"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:minHeight="48dp"
+            android:text="@string/editor_cancel"
+            android:textAllCaps="false"
+            android:textColor="#9CA3AF"
+            android:textSize="12sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clipboard_paste"
+            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:minHeight="48dp"
+            android:text="@string/workspace_clipboard_paste"
+            android:textAllCaps="false"
+            android:textColor="#06150E"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            app:backgroundTint="#10B981"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+    <!-- Batch Edit, Copy, Move & Compress Footer CTA -->
     <LinearLayout
         android:id="@+id/workspace_batch_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:visibility="gone">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_batch_clear"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:layout_marginEnd="8dp"
-            android:text="@string/editor_cancel"
-            android:textAllCaps="false"
-            android:textColor="#C9D1D9"
-            app:cornerRadius="12dp"
-            app:strokeColor="#30363D" />
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_open_selected_batch"
-            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:text="@string/workspace_menu_action_open_selected_none"
-            android:textAllCaps="false"
-            android:textColor="#081018"
-            android:textStyle="bold"
-            app:backgroundTint="#38BDF8"
-            app:cornerRadius="12dp" />
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_batch_clear"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:text="@string/editor_cancel"
+                    android:textAllCaps="false"
+                    android:textColor="#C9D1D9"
+                    android:textSize="12sp"
+                    app:cornerRadius="10dp"
+                    app:strokeColor="#30363D" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_copy_selected_batch"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:enabled="false"
+                    android:text="@string/workspace_item_copy"
+                    android:textAllCaps="false"
+                    android:textColor="#10B981"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/ic_workspace_copy"
+                    app:iconSize="16dp"
+                    app:iconTint="#10B981"
+                    app:strokeColor="#1D4D3D" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_move_selected_batch"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:enabled="false"
+                    android:text="@string/workspace_menu_move_to"
+                    android:textAllCaps="false"
+                    android:textColor="#F59E0B"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/ic_workspace_move"
+                    app:iconSize="16dp"
+                    app:iconTint="#F59E0B"
+                    app:strokeColor="#5A4216" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_compress_selected_batch"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:enabled="false"
+                    android:text="@string/workspace_item_compress"
+                    android:textAllCaps="false"
+                    android:textColor="#A78BFA"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/ic_workspace_archive"
+                    app:iconSize="16dp"
+                    app:iconTint="#A78BFA"
+                    app:strokeColor="#3F3169" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_open_selected_batch"
+                    style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="@string/workspace_menu_action_open_selected_none"
+                    android:textAllCaps="false"
+                    android:textColor="#081018"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:backgroundTint="#38BDF8"
+                    app:cornerRadius="10dp" />
+            </LinearLayout>
+        </HorizontalScrollView>
     </LinearLayout>
 
 </LinearLayout>
