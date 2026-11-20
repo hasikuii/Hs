@@ -1,0 +1,121 @@
+name: Build Termux APK (ARM64)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      package_variant:
+        description: "Termux bootstrap package variant"
+        required: false
+        default: "apt-android-7"
+        type: choice
+        options:
+          - apt-android-7
+          - apt-android-5
+      run_tests:
+        description: "Run unit tests before building APK"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Prepare debug keystore and gradlew
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              base64 -d debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+      - name: Run unit tests
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Build ARM64 Debug APK
+        shell: bash
+        env:
+          PACKAGE_VARIANT: ${{ inputs.package_variant || 'apt-android-7' }}
+        run: |
+          set -euo pipefail
+
+          SHA="${GITHUB_SHA}"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            SHA="${{ github.event.pull_request.head.sha }}"
+          fi
+
+          CURRENT_VERSION_NAME="$(grep -m 1 -E '^\s+versionName "([^"]+)"$' ./app/build.gradle | sed -E 's/^\s+versionName "([^"]+)"$/\1/')"
+          APP_VERSION_NAME="${CURRENT_VERSION_NAME}+${SHA:0:7}"
+
+          export TERMUX_APP_VERSION_NAME="$APP_VERSION_NAME"
+          export TERMUX_PACKAGE_VARIANT="$PACKAGE_VARIANT"
+
+          ./gradlew :app:assembleDebug --no-daemon
+
+          APK_SRC="./app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_SRC" ]; then
+            echo "Built APK not found at $APK_SRC"
+            exit 1
+          fi
+
+          OUT_DIR="./build-artifacts"
+          APK_OUT_NAME="termux-app_v${APP_VERSION_NAME}-${PACKAGE_VARIANT}-arm64-v8a-debug.apk"
+          mkdir -p "$OUT_DIR"
+          cp "$APK_SRC" "$OUT_DIR/$APK_OUT_NAME"
+          cp "./app/build/outputs/apk/debug/output-metadata.json" "$OUT_DIR/output-metadata.json"
+          (cd "$OUT_DIR" && sha256sum "$APK_OUT_NAME" > "${APK_OUT_NAME}.sha256")
+
+          APK_BYTES="$(wc -c < "$OUT_DIR/$APK_OUT_NAME")"
+          APK_SHA256="$(cut -d' ' -f1 "$OUT_DIR/${APK_OUT_NAME}.sha256")"
+
+          echo "APK_OUT_NAME=$APK_OUT_NAME" >> "$GITHUB_ENV"
+          echo "### Termux ARM64 Debug APK" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **File:** \`$APK_OUT_NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **ABI:** \`arm64-v8a\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Size:** ${APK_BYTES} bytes" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **SHA-256:** \`$APK_SHA256\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.APK_OUT_NAME }}
+          retention-days: 30
+          path: |
+            ./build-artifacts/${{ env.APK_OUT_NAME }}
+            ./build-artifacts/${{ env.APK_OUT_NAME }}.sha256
+            ./build-artifacts/output-metadata.json
