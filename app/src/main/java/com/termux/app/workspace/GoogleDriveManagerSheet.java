@@ -2,7 +2,12 @@ package com.termux.app.workspace;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -77,6 +82,10 @@ public final class GoogleDriveManagerSheet {
     private String mAccessToken;
     private String mSearchQuery = "";
     private boolean mBusy = false;
+    private TextView mAccountStatusView;
+    private TextView mEmptyTextView;
+    private Runnable mUpdateHeaderUi;
+    private Runnable mConnectFlow;
 
     public void show(@NonNull Activity activity, @NonNull File localDir, @Nullable Runnable onLocalChanged) {
         mFolderStack.clear();
@@ -89,6 +98,7 @@ public final class GoogleDriveManagerSheet {
         dialog.getBehavior().setSkipCollapsed(true);
 
         TextView accountStatus = root.findViewById(R.id.drive_account_status);
+        mAccountStatusView = accountStatus;
         TextView pathBar = root.findViewById(R.id.drive_path_bar);
         ImageButton upBtn = root.findViewById(R.id.btn_drive_up);
         ImageButton refreshBtn = root.findViewById(R.id.btn_drive_refresh);
@@ -102,6 +112,7 @@ public final class GoogleDriveManagerSheet {
         RecyclerView recyclerView = root.findViewById(R.id.drive_file_list);
         View emptyView = root.findViewById(R.id.drive_empty_view);
         TextView emptyText = root.findViewById(R.id.drive_empty_text);
+        mEmptyTextView = emptyText;
         View batchBar = root.findViewById(R.id.drive_batch_bar);
         MaterialButton batchClearBtn = root.findViewById(R.id.btn_drive_batch_clear);
         MaterialButton batchDeleteBtn = root.findViewById(R.id.btn_drive_batch_delete);
@@ -140,7 +151,10 @@ public final class GoogleDriveManagerSheet {
             progressContainer.setVisibility(mBusy ? View.VISIBLE : View.GONE);
         };
 
+        mUpdateHeaderUi = updateHeaderUi;
         final Runnable[] refreshDriveRef = new Runnable[1];
+        final Runnable[] connectFlowRef = new Runnable[1];
+
         refreshDriveRef[0] = () -> {
             if (mAccessToken == null || mAccessToken.isEmpty()) {
                 mEntries.clear();
@@ -158,15 +172,31 @@ public final class GoogleDriveManagerSheet {
             final String query = mSearchQuery;
             mExecutor.execute(() -> {
                 try {
-                    GoogleDriveApiClient.DriveAccountInfo info = GoogleDriveApiClient.fetchAccountInfo(mAccessToken);
+                    GoogleDriveApiClient.DriveAccountInfo info = null;
+                    try {
+                        info = GoogleDriveApiClient.fetchAccountInfo(mAccessToken);
+                    } catch (IOException aboutErr) {
+                        if (aboutErr instanceof GoogleDriveApiClient.DriveApiException) {
+                            GoogleDriveApiClient.DriveApiException dae =
+                                (GoogleDriveApiClient.DriveApiException) aboutErr;
+                            if (dae.httpCode == 401 || dae.isAccessNotConfigured() || dae.isInsufficientPermissions()) {
+                                throw aboutErr;
+                            }
+                        }
+                    }
                     List<GoogleDriveApiClient.DriveItem> items = GoogleDriveApiClient.listFiles(mAccessToken, folderId, query);
+                    final GoogleDriveApiClient.DriveAccountInfo finalInfo = info;
                     mMainHandler.post(() -> {
                         mBusy = false;
                         showBusy.run();
-                        String quotaStr = info.limitBytes > 0
-                            ? " (" + formatBytes(info.usedBytes) + " / " + formatBytes(info.limitBytes) + ")"
-                            : "";
-                        accountStatus.setText((info.email.isEmpty() ? info.displayName : info.email) + quotaStr);
+                        if (finalInfo != null) {
+                            String quotaStr = finalInfo.limitBytes > 0
+                                ? " (" + formatBytes(finalInfo.usedBytes) + " / " + formatBytes(finalInfo.limitBytes) + ")"
+                                : "";
+                            accountStatus.setText((finalInfo.email.isEmpty() ? finalInfo.displayName : finalInfo.email) + quotaStr);
+                        } else {
+                            accountStatus.setText("Đã kết nối Google Drive");
+                        }
                         mEntries.clear();
                         mEntries.addAll(items);
                         mSelectedIds.clear();
@@ -179,19 +209,16 @@ public final class GoogleDriveManagerSheet {
                     mMainHandler.post(() -> {
                         mBusy = false;
                         showBusy.run();
-                        if (e.getMessage() != null && e.getMessage().contains("(401)")) {
-                            GoogleDriveAuthHelper.getInstance().clearSession();
-                            mAccessToken = null;
-                            accountStatus.setText(R.string.drive_not_connected);
+                        if (mEntries.isEmpty()) {
+                            emptyView.setVisibility(View.VISIBLE);
                         }
-                        Toast.makeText(activity, "Lỗi Drive: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                        updateHeaderUi.run();
+                        handleDriveError(activity, e, true);
                     });
                 }
             });
         };
 
-        Runnable connectFlow = () -> GoogleDriveAuthHelper.getInstance().authorize(activity, false,
+        connectFlowRef[0] = () -> GoogleDriveAuthHelper.getInstance().authorize(activity, false,
             new GoogleDriveAuthHelper.AuthCallback() {
                 @Override
                 public void onAuthorized(@NonNull String accessToken) {
@@ -209,6 +236,8 @@ public final class GoogleDriveManagerSheet {
                     updateHeaderUi.run();
                 }
             });
+        Runnable connectFlow = connectFlowRef[0];
+        mConnectFlow = connectFlow;
 
         adapter.setListener(new DriveRowListener() {
             @Override
@@ -274,7 +303,7 @@ public final class GoogleDriveManagerSheet {
 
         connectBtn.setOnClickListener(v -> {
             if (mAccessToken != null && !mAccessToken.isEmpty()) {
-                GoogleDriveAuthHelper.getInstance().clearSession();
+                GoogleDriveAuthHelper.getInstance().invalidateSession(activity);
                 mAccessToken = null;
                 accountStatus.setText(R.string.drive_not_connected);
                 mEntries.clear();
@@ -317,7 +346,7 @@ public final class GoogleDriveManagerSheet {
                         mMainHandler.post(() -> {
                             mBusy = false;
                             showBusy.run();
-                            Toast.makeText(activity, "Lỗi tạo thư mục: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            handleDriveError(activity, e, false);
                         });
                     }
                 });
@@ -453,7 +482,7 @@ public final class GoogleDriveManagerSheet {
                         mMainHandler.post(() -> {
                             mBusy = false;
                             progressContainer.setVisibility(View.GONE);
-                            Toast.makeText(activity, "Lỗi sao lưu: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            handleDriveError(activity, e, false);
                         });
                     } finally {
                         //noinspection ResultOfMethodCallIgnored
@@ -533,7 +562,7 @@ public final class GoogleDriveManagerSheet {
                         mMainHandler.post(() -> {
                             mBusy = false;
                             progressContainer.setVisibility(View.GONE);
-                            Toast.makeText(activity, "Lỗi upload: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            handleDriveError(activity, e, false);
                         });
                     }
                 });
@@ -586,7 +615,7 @@ public final class GoogleDriveManagerSheet {
                         mMainHandler.post(() -> {
                             mBusy = false;
                             progressContainer.setVisibility(View.GONE);
-                            Toast.makeText(activity, "Lỗi tải xuống: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            handleDriveError(activity, e, false);
                         });
                     }
                 });
@@ -616,7 +645,7 @@ public final class GoogleDriveManagerSheet {
                     mMainHandler.post(() -> {
                         mBusy = false;
                         progressContainer.setVisibility(View.GONE);
-                        Toast.makeText(activity, "Lỗi đổi tên: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        handleDriveError(activity, e, false);
                     });
                 }
             });
@@ -654,7 +683,7 @@ public final class GoogleDriveManagerSheet {
                         mMainHandler.post(() -> {
                             mBusy = false;
                             progressContainer.setVisibility(View.GONE);
-                            Toast.makeText(activity, "Lỗi xóa trên Drive: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            handleDriveError(activity, e, false);
                         });
                     }
                 });
@@ -755,6 +784,81 @@ public final class GoogleDriveManagerSheet {
                 moreBtn = itemView.findViewById(R.id.drive_item_more);
             }
         }
+    }
+
+    private void handleDriveError(@NonNull Activity activity,
+                                  @NonNull IOException error,
+                                  boolean updateEmptyViewText) {
+        String title = "Lỗi Google Drive API";
+        String body = error.getMessage() != null ? error.getMessage() : "Lỗi không xác định";
+        String helpUrl = null;
+        boolean needsReauth = false;
+        boolean canTryDriveFileScope = false;
+
+        if (error instanceof GoogleDriveApiClient.DriveApiException) {
+            GoogleDriveApiClient.DriveApiException dae = (GoogleDriveApiClient.DriveApiException) error;
+            title = "Google Drive API (" + dae.httpCode + ")";
+            body = dae.getVietnameseGuidance();
+            helpUrl = dae.helpUrl;
+            if (dae.httpCode == 401 || dae.isInsufficientPermissions()) {
+                needsReauth = true;
+                GoogleDriveAuthHelper.getInstance().invalidateSession(activity);
+                mAccessToken = null;
+                if (mAccountStatusView != null) {
+                    mAccountStatusView.setText(R.string.drive_not_connected);
+                }
+            }
+            if (dae.httpCode == 403
+                && GoogleDriveAuthHelper.DRIVE_SCOPE.equals(GoogleDriveAuthHelper.getInstance().getActiveScope())
+                && !dae.isAccessNotConfigured()) {
+                canTryDriveFileScope = true;
+            }
+        }
+
+        if (updateEmptyViewText && mEmptyTextView != null) {
+            mEmptyTextView.setText(body);
+        }
+        if (mUpdateHeaderUi != null) {
+            mUpdateHeaderUi.run();
+        }
+
+        if (activity.isFinishing() || activity.isDestroyed()) return;
+
+        final String copyText = title + "\n" + body + (helpUrl != null ? "\n" + helpUrl : "");
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+            .setTitle(title)
+            .setMessage(body)
+            .setNegativeButton("Đóng", null);
+
+        builder.setNeutralButton("Sao chép lỗi", (d, w) -> {
+            ClipboardManager cm = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("drive_error", copyText));
+                Toast.makeText(activity, "Đã sao chép chi tiết lỗi", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        if (helpUrl != null && !helpUrl.isEmpty()) {
+            final String targetUrl = helpUrl;
+            builder.setPositiveButton("Mở Google Console", (d, w) -> {
+                try {
+                    activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)));
+                } catch (Exception ex) {
+                    Toast.makeText(activity, targetUrl, Toast.LENGTH_LONG).show();
+                }
+            });
+        } else if (needsReauth && mConnectFlow != null) {
+            builder.setPositiveButton("Cấp lại quyền", (d, w) -> mConnectFlow.run());
+        } else if (canTryDriveFileScope && mConnectFlow != null) {
+            builder.setPositiveButton("Thử quyền drive.file", (d, w) -> {
+                GoogleDriveAuthHelper.getInstance().setUseDriveFileScopeOnly(true);
+                GoogleDriveAuthHelper.getInstance().invalidateSession(activity);
+                mAccessToken = null;
+                mConnectFlow.run();
+            });
+        }
+
+        builder.show();
     }
 
     @NonNull

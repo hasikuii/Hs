@@ -25,11 +25,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Pure HttpURLConnection REST v3 client for Google Drive:
  * account info, browse folders/files, create folder, upload files/folders (resumable),
- * download files/folders, rename, and delete.
+ * download files/folders, rename, delete, and structured Drive API error parsing.
  */
 public final class GoogleDriveApiClient {
 
@@ -37,6 +39,74 @@ public final class GoogleDriveApiClient {
     private static final String DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
     private static final String DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
     private static final int CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB resumable upload chunks
+    private static final Pattern URL_PATTERN = Pattern.compile("https://[^\\s\"'<>]+");
+
+    public static final class DriveApiException extends IOException {
+        public final int httpCode;
+        @NonNull public final String reason;
+        @NonNull public final String apiMessage;
+        @Nullable public final String helpUrl;
+
+        public DriveApiException(int httpCode,
+                                 @NonNull String reason,
+                                 @NonNull String apiMessage,
+                                 @Nullable String helpUrl) {
+            super(buildDisplayMessage(httpCode, reason, apiMessage));
+            this.httpCode = httpCode;
+            this.reason = reason;
+            this.apiMessage = apiMessage;
+            this.helpUrl = helpUrl;
+        }
+
+        public boolean isAccessNotConfigured() {
+            return httpCode == 403 && ("accessNotConfigured".equals(reason)
+                || apiMessage.toLowerCase(Locale.ROOT).contains("has not been used in project")
+                || apiMessage.toLowerCase(Locale.ROOT).contains("it is disabled"));
+        }
+
+        public boolean isInsufficientPermissions() {
+            return httpCode == 403 && ("insufficientPermissions".equals(reason)
+                || "PERMISSION_DENIED".equalsIgnoreCase(reason)
+                || apiMessage.toLowerCase(Locale.ROOT).contains("insufficient authentication scopes"));
+        }
+
+        public boolean isCannotDownloadAbusiveFile() {
+            return httpCode == 403 && "cannotDownloadAbusiveFile".equals(reason);
+        }
+
+        @NonNull
+        public String getVietnameseGuidance() {
+            if (isAccessNotConfigured()) {
+                return "Lỗi 403 (accessNotConfigured): Google Drive API chưa được bật trên Google Cloud Console của project OAuth.\n\n"
+                    + "Cách sửa: Mở Google Cloud Console → APIs & Services → Library → tìm \"Google Drive API\" và bấm Enable.\n\n"
+                    + "Chi tiết từ Google:\n" + apiMessage;
+            }
+            if (isInsufficientPermissions()) {
+                return "Lỗi 403 (insufficientPermissions): Tài khoản chưa cấp đủ quyền Google Drive cho ứng dụng.\n\n"
+                    + "Cách sửa: Bấm \"Cấp lại quyền\" và đảm bảo tích chọn ô quyền Google Drive trên hộp thoại xác nhận của Google.\n\n"
+                    + "Chi tiết: " + apiMessage;
+            }
+            if (httpCode == 403 && "storageQuotaExceeded".equals(reason)) {
+                return "Lỗi 403: Bộ nhớ Google Drive của bạn đã đầy.";
+            }
+            if (httpCode == 403 && ("rateLimitExceeded".equals(reason) || "userRateLimitExceeded".equals(reason))) {
+                return "Lỗi 403: Vượt quá giới hạn tốc độ gọi Google Drive API. Vui lòng thử lại sau ít phút.";
+            }
+            if (httpCode == 403) {
+                return "Lỗi 403" + (reason.isEmpty() ? "" : " (" + reason + ")") + ":\n" + apiMessage
+                    + "\n\nKiểm tra: (1) Đã bật Google Drive API trên Google Cloud chưa, (2) Đã thêm SHA-1 chứng chỉ ký APK vào Android OAuth Client chưa, (3) Đã tích chọn quyền Drive khi đăng nhập chưa.";
+            }
+            return "Lỗi " + httpCode + (reason.isEmpty() ? "" : " (" + reason + ")") + ": " + apiMessage;
+        }
+
+        @NonNull
+        private static String buildDisplayMessage(int httpCode, @NonNull String reason, @NonNull String apiMessage) {
+            if (reason.isEmpty()) {
+                return "Drive API error (" + httpCode + "): " + apiMessage;
+            }
+            return "Drive API error (" + httpCode + " - " + reason + "): " + apiMessage;
+        }
+    }
 
     public static final class DriveAccountInfo {
         public final String displayName;
@@ -112,6 +182,8 @@ public final class GoogleDriveApiClient {
             + "?q=" + URLEncoder.encode(q.toString(), "UTF-8")
             + "&orderBy=" + URLEncoder.encode("folder,name", "UTF-8")
             + "&pageSize=200"
+            + "&supportsAllDrives=true"
+            + "&includeItemsFromAllDrives=true"
             + "&fields=" + URLEncoder.encode("files(id,name,mimeType,size,modifiedTime)", "UTF-8");
 
         JSONObject json = requestJson("GET", url, token, null, false);
@@ -141,7 +213,7 @@ public final class GoogleDriveApiClient {
         } catch (JSONException e) {
             throw new IOException("JSON build error", e);
         }
-        String url = DRIVE_API_BASE + "/files?fields=id,name,mimeType,size,modifiedTime";
+        String url = DRIVE_API_BASE + "/files?supportsAllDrives=true&fields=id,name,mimeType,size,modifiedTime";
         JSONObject created = requestJson("POST", url, token, body.toString(), false);
         return parseDriveItem(created);
     }
@@ -155,6 +227,8 @@ public final class GoogleDriveApiClient {
         String url = DRIVE_API_BASE + "/files"
             + "?q=" + URLEncoder.encode(q, "UTF-8")
             + "&pageSize=1"
+            + "&supportsAllDrives=true"
+            + "&includeItemsFromAllDrives=true"
             + "&fields=" + URLEncoder.encode("files(id,name,mimeType,size,modifiedTime)", "UTF-8");
 
         JSONObject json = requestJson("GET", url, token, null, false);
@@ -190,8 +264,8 @@ public final class GoogleDriveApiClient {
         }
 
         long totalBytes = localFile.length();
-        // Initiate resumable upload session (handles empty, small, and large files reliably)
-        String initUrl = DRIVE_UPLOAD_BASE + "/files?uploadType=resumable&fields=id,name,mimeType,size,modifiedTime";
+        String initUrl = DRIVE_UPLOAD_BASE
+            + "/files?uploadType=resumable&supportsAllDrives=true&fields=id,name,mimeType,size,modifiedTime";
         HttpURLConnection initConn = (HttpURLConnection) new URL(initUrl).openConnection();
         initConn.setConnectTimeout(20000);
         initConn.setReadTimeout(30000);
@@ -210,7 +284,7 @@ public final class GoogleDriveApiClient {
 
         int initCode = initConn.getResponseCode();
         if (initCode < 200 || initCode >= 300) {
-            throw new IOException("Drive upload init failed (" + initCode + "): " + readError(initConn));
+            throw buildDriveException(initCode, readErrorRaw(initConn));
         }
 
         String sessionUri = initConn.getHeaderField("Location");
@@ -225,10 +299,10 @@ public final class GoogleDriveApiClient {
             putConn.setFixedLengthStreamingMode(0);
             putConn.setRequestProperty("Content-Type", mimeType);
             int code = putConn.getResponseCode();
-            String resp = readStream(code >= 200 && code < 300 ? putConn.getInputStream() : putConn.getErrorStream());
             if (code < 200 || code >= 300) {
-                throw new IOException("Upload failed (" + code + "): " + resp);
+                throw buildDriveException(code, readErrorRaw(putConn));
             }
+            String resp = readStream(putConn.getInputStream());
             try {
                 return parseDriveItem(new JSONObject(resp));
             } catch (JSONException e) {
@@ -277,7 +351,7 @@ public final class GoogleDriveApiClient {
                     offset += readTotal;
                     break;
                 } else {
-                    throw new IOException("Upload failed (" + code + "): " + readError(chunkConn));
+                    throw buildDriveException(code, readErrorRaw(chunkConn));
                 }
             }
         }
@@ -321,6 +395,22 @@ public final class GoogleDriveApiClient {
                                     @NonNull DriveItem item,
                                     @NonNull File destDir,
                                     @Nullable TransferProgress progress) throws IOException {
+        try {
+            return downloadFileInternal(token, item, destDir, progress, false);
+        } catch (DriveApiException e) {
+            if (e.isCannotDownloadAbusiveFile()) {
+                return downloadFileInternal(token, item, destDir, progress, true);
+            }
+            throw e;
+        }
+    }
+
+    @NonNull
+    private static File downloadFileInternal(@NonNull String token,
+                                            @NonNull DriveItem item,
+                                            @NonNull File destDir,
+                                            @Nullable TransferProgress progress,
+                                            boolean acknowledgeAbuse) throws IOException {
         if (!destDir.exists() && !destDir.mkdirs()) {
             throw new IOException("Không thể tạo thư mục lưu tệp");
         }
@@ -334,7 +424,9 @@ public final class GoogleDriveApiClient {
             url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(item.id, "UTF-8")
                 + "/export?mimeType=" + URLEncoder.encode("application/pdf", "UTF-8");
         } else {
-            url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(item.id, "UTF-8") + "?alt=media";
+            url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(item.id, "UTF-8")
+                + "?alt=media&supportsAllDrives=true"
+                + (acknowledgeAbuse ? "&acknowledgeAbuse=true" : "");
         }
 
         if (progress != null) {
@@ -349,7 +441,7 @@ public final class GoogleDriveApiClient {
 
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
-            throw new IOException("Download failed (" + code + "): " + readError(conn));
+            throw buildDriveException(code, readErrorRaw(conn));
         }
 
         File target = new File(destDir, outName);
@@ -395,12 +487,12 @@ public final class GoogleDriveApiClient {
         } catch (JSONException e) {
             throw new IOException("JSON build error", e);
         }
-        String url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(fileId, "UTF-8");
+        String url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(fileId, "UTF-8") + "?supportsAllDrives=true";
         requestJson("POST", url, token, body.toString(), true);
     }
 
     public static void deleteFile(@NonNull String token, @NonNull String fileId) throws IOException {
-        String url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(fileId, "UTF-8");
+        String url = DRIVE_API_BASE + "/files/" + URLEncoder.encode(fileId, "UTF-8") + "?supportsAllDrives=true";
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(20000);
         conn.setReadTimeout(20000);
@@ -408,8 +500,67 @@ public final class GoogleDriveApiClient {
         conn.setRequestProperty("Authorization", "Bearer " + token);
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
-            throw new IOException("Delete failed (" + code + "): " + readError(conn));
+            throw buildDriveException(code, readErrorRaw(conn));
         }
+    }
+
+    @NonNull
+    public static DriveApiException buildDriveException(int httpCode, @NonNull String rawBody) {
+        String reason = "";
+        String apiMessage = rawBody;
+        String helpUrl = null;
+
+        try {
+            JSONObject root = new JSONObject(rawBody);
+            JSONObject error = root.optJSONObject("error");
+            if (error != null) {
+                String msg = error.optString("message", "");
+                if (!msg.isEmpty()) {
+                    apiMessage = msg;
+                }
+                reason = error.optString("status", "");
+                JSONArray errors = error.optJSONArray("errors");
+                if (errors != null && errors.length() > 0) {
+                    JSONObject firstErr = errors.optJSONObject(0);
+                    if (firstErr != null) {
+                        String r = firstErr.optString("reason", "");
+                        if (!r.isEmpty()) reason = r;
+                        String extHelp = firstErr.optString("extendedHelp", "");
+                        if (!extHelp.isEmpty()) helpUrl = extHelp;
+                    }
+                }
+                JSONArray details = error.optJSONArray("details");
+                if (details != null) {
+                    for (int i = 0; i < details.length(); i++) {
+                        JSONObject d = details.optJSONObject(i);
+                        if (d == null) continue;
+                        if (reason.isEmpty() && !d.optString("reason", "").isEmpty()) {
+                            reason = d.optString("reason", "");
+                        }
+                        JSONObject meta = d.optJSONObject("metadata");
+                        if (meta != null && helpUrl == null) {
+                            String act = meta.optString("activationUrl", "");
+                            if (!act.isEmpty()) helpUrl = act;
+                        }
+                    }
+                }
+            }
+        } catch (JSONException ignored) {
+            // Keep rawBody as apiMessage when response is plain text/HTML
+        }
+
+        if (helpUrl == null) {
+            Matcher m = URL_PATTERN.matcher(apiMessage);
+            if (m.find()) {
+                String found = m.group();
+                if (found.endsWith(".") || found.endsWith(",")) {
+                    found = found.substring(0, found.length() - 1);
+                }
+                helpUrl = found;
+            }
+        }
+
+        return new DriveApiException(httpCode, reason, apiMessage, helpUrl);
     }
 
     @NonNull
@@ -438,7 +589,7 @@ public final class GoogleDriveApiClient {
         }
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
-            throw new IOException("Drive API error (" + code + "): " + readError(conn));
+            throw buildDriveException(code, readErrorRaw(conn));
         }
         String resp = readStream(conn.getInputStream());
         if (resp.trim().isEmpty()) return new JSONObject();
@@ -490,7 +641,7 @@ public final class GoogleDriveApiClient {
     }
 
     @NonNull
-    private static String readError(@NonNull HttpURLConnection conn) {
+    private static String readErrorRaw(@NonNull HttpURLConnection conn) {
         try {
             InputStream err = conn.getErrorStream();
             if (err != null) {
