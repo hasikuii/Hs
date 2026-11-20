@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_workspace_sheet"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="16dp">
+
+    <!-- Drag Handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="12dp"
+        android:background="#3B4254" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/tree_creator_title"
+        android:textColor="#F0F6FC"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tree_target_path"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="start"
+        android:fontFamily="monospace"
+        android:singleLine="true"
+        android:textColor="#38BDF8"
+        android:textSize="12sp" />
+
+    <!-- Helper Action Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tree_paste"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:layout_marginEnd="8dp"
+            android:minHeight="48dp"
+            android:text="@string/tree_creator_paste"
+            android:textAllCaps="false"
+            android:textColor="#38BDF8"
+            android:textSize="12sp"
+            app:cornerRadius="10dp"
+            app:icon="@drawable/ic_workspace_paste"
+            app:iconSize="16dp"
+            app:iconTint="#38BDF8"
+            app:strokeColor="#2F4A65" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tree_sample"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:layout_marginEnd="8dp"
+            android:minHeight="48dp"
+            android:text="@string/tree_creator_sample"
+            android:textAllCaps="false"
+            android:textColor="#F59E0B"
+            android:textSize="12sp"
+            app:cornerRadius="10dp"
+            app:strokeColor="#4A3918" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tree_clear"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:minHeight="48dp"
+            android:text="@string/tree_creator_clear"
+            android:textAllCaps="false"
+            android:textColor="#9CA3AF"
+            android:textSize="12sp"
+            app:cornerRadius="10dp"
+            app:strokeColor="#2E3648" />
+    </LinearLayout>
+
+    <!-- Monospace Input Area -->
+    <EditText
+        android:id="@+id/tree_input_edit"
+        android:layout_width="match_parent"
+        android:layout_height="160dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_workspace_input"
+        android:fontFamily="monospace"
+        android:gravity="top|start"
+        android:hint="@string/tree_creator_hint"
+        android:inputType="textMultiLine|textNoSuggestions"
+        android:padding="12dp"
+        android:scrollbars="vertical"
+        android:textColor="#E6EDF3"
+        android:textColorHint="#6E7681"
+        android:textSize="12sp" />
+
+    <!-- Root Folder Option -->
+    <CheckBox
+        android:id="@+id/tree_include_root_checkbox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:buttonTint="#10B981"
+        android:checked="true"
+        android:minHeight="44dp"
+        android:text="@string/tree_creator_include_root"
+        android:textColor="#C9D1D9"
+        android:textSize="13sp" />
+
+    <!-- Preview Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tree_creator_preview_title"
+            android:textColor="#8B949E"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tree_preview_summary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#10B981"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Preview List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/tree_preview_list"
+        android:layout_width="match_parent"
+        android:layout_height="150dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/bg_workspace_input"
+        android:padding="6dp" />
+
+    <!-- Create / Post-Create Open Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tree_create"
+            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="@string/tree_creator_create_btn"
+            android:textAllCaps="false"
+            android:textColor="#06150E"
+            android:textStyle="bold"
+            app:backgroundTint="#10B981"
+            app:cornerRadius="12dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tree_open_created"
+            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="@string/tree_creator_open_created"
+            android:textAllCaps="false"
+            android:textColor="#081018"
+            android:textStyle="bold"
+            android:visibility="gone"
+            app:backgroundTint="#38BDF8"
+            app:cornerRadius="12dp" />
+    </LinearLayout>
+
+</LinearLayout>

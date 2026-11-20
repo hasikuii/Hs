@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Workspace Menu BottomSheet -->
+    <string name="workspace_menu_title">Trình quản lý tệp</string>
+    <string name="workspace_menu_search_hint">Tìm tệp hoặc thư mục…</string>
+    <string name="workspace_menu_action_tree">Dán sơ đồ cây</string>
+    <string name="workspace_menu_action_new_file">+ Tệp</string>
+    <string name="workspace_menu_action_new_folder">+ Thư mục</string>
+    <string name="workspace_menu_action_batch_select">Chọn nhiều</string>
+    <string name="workspace_menu_action_open_batch">Sửa hàng loạt (%d)</string>
+    <string name="workspace_menu_action_open_selected_none">Chọn tệp để sửa hàng loạt</string>
+    <string name="workspace_menu_empty">Thư mục này đang trống</string>
+    <string name="workspace_menu_empty_hint">Tạo tệp mới hoặc dán sơ đồ cây để dựng cấu trúc dự án ngay.</string>
+    <string name="workspace_menu_cd_synced">Đã chuyển terminal tới: %1$s</string>
+    <string name="workspace_menu_up_desc">Lên thư mục cha</string>
+    <string name="workspace_menu_home_desc">Về thư mục Home</string>
+    <string name="workspace_menu_refresh_desc">Làm mới danh sách</string>
+    <string name="workspace_menu_cd_desc">Đồng bộ cd trong terminal</string>
+    <string name="workspace_menu_more_desc">Tùy chọn thêm</string>
+
+    <!-- Tree Creator -->
+    <string name="tree_creator_title">Tạo cấu trúc từ sơ đồ cây</string>
+    <string name="tree_creator_subtitle">Thư mục đích: %1$s</string>
+    <string name="tree_creator_hint">Dán sơ đồ cây tại đây…\nHỗ trợ: ├── └── │, |-- +-- \\--, thụt lề dấu cách/tab, gạch đầu dòng -/*, hoặc đường dẫn a/b/c.py</string>
+    <string name="tree_creator_paste">Dán</string>
+    <string name="tree_creator_sample">Mẫu thử</string>
+    <string name="tree_creator_clear">Xóa</string>
+    <string name="tree_creator_include_root">Giữ thư mục gốc nếu chỉ có 1 gốc</string>
+    <string name="tree_creator_preview_title">Xem trước (chạm để đổi Tệp / Thư mục)</string>
+    <string name="tree_creator_preview_summary">%1$d thư mục • %2$d tệp</string>
+    <string name="tree_creator_preview_summary_existing">%1$d thư mục • %2$d tệp (%3$d đã có)</string>
+    <string name="tree_creator_create_btn">Tạo cấu trúc</string>
+    <string name="tree_creator_success">Đã tạo %1$d thư mục và %2$d tệp (bỏ qua %3$d mục đã có).</string>
+    <string name="tree_creator_open_created">Mở sửa hàng loạt (%d tệp)</string>
+
+    <!-- Workspace Batch Editor (Pydroid-style) -->
+    <string name="editor_title">Trình soạn thảo</string>
+    <string name="editor_save">Lưu</string>
+    <string name="editor_save_all">Lưu hết (%d)</string>
+    <string name="editor_saved_one">Đã lưu %1$s</string>
+    <string name="editor_saved_all">Đã lưu tất cả %1$d tệp</string>
+    <string name="editor_run">Chạy</string>
+    <string name="editor_find_replace">Tìm &amp; Thay thế</string>
+    <string name="editor_add_file">Thêm tệp</string>
+    <string name="editor_empty_title">Chưa mở tệp nào</string>
+    <string name="editor_empty_hint">Chạm nút + ở góc trên để chọn tệp hoặc quay lại danh sách thư mục.</string>
+    <string name="editor_unsaved_title">Có thay đổi chưa lưu</string>
+    <string name="editor_unsaved_message">Bạn đang có %1$d tệp chưa lưu. Bạn muốn lưu tất cả trước khi thoát?</string>
+    <string name="editor_save_and_exit">Lưu tất cả &amp; thoát</string>
+    <string name="editor_discard">Bỏ thay đổi</string>
+    <string name="editor_cancel">Hủy</string>
+    <string name="editor_find_hint">Tìm kiếm…</string>
+    <string name="editor_replace_hint">Thay thế bằng…</string>
+    <string name="editor_replace_current">Thay trong tab này</string>
+    <string name="editor_replace_all_tabs">Thay tất cả các tab (%d)</string>
+    <string name="editor_replaced_count">Đã thay thế %1$d vị trí</string>
+    <string name="editor_close_tab_desc">Đóng tab</string>
+    <string name="editor_back_desc">Quay lại Terminal</string>
+</resources>

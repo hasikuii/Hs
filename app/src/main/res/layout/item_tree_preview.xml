@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:minHeight="38dp"
+    android:orientation="horizontal"
+    android:paddingHorizontal="8dp"
+    android:paddingVertical="4dp">
+
+    <ImageView
+        android:id="@+id/tree_preview_icon"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:layout_marginEnd="8dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_workspace_file" />
+
+    <TextView
+        android:id="@+id/tree_preview_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:fontFamily="monospace"
+        android:singleLine="true"
+        android:textColor="#E6EDF3"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/tree_preview_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="2dp"
+        android:textColor="#8B949E"
+        android:textSize="10sp" />
+
+</LinearLayout>

@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/editor_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0E1015"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <!-- Top IDE Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="#161922"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="4dp">
+
+        <ImageButton
+            android:id="@+id/btn_editor_back"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/editor_back_desc"
+            android:src="@drawable/ic_workspace_back"
+            app:tint="#E6EDF3" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingHorizontal="4dp">
+
+            <TextView
+                android:id="@+id/editor_title_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="middle"
+                android:singleLine="true"
+                android:text="@string/editor_title"
+                android:textColor="#F0F6FC"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/editor_subtitle_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="start"
+                android:fontFamily="monospace"
+                android:singleLine="true"
+                android:textColor="#8B949E"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btn_editor_add_file"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/editor_add_file"
+            android:src="@drawable/ic_workspace_add"
+            app:tint="#38BDF8" />
+
+        <ImageButton
+            android:id="@+id/btn_editor_find"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/editor_find_replace"
+            android:src="@drawable/ic_workspace_search"
+            app:tint="#C9D1D9" />
+
+        <ImageButton
+            android:id="@+id/btn_editor_save"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/editor_save"
+            android:src="@drawable/ic_workspace_save"
+            app:tint="#C9D1D9" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_editor_save_all"
+            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:layout_marginEnd="4dp"
+            android:minWidth="0dp"
+            android:paddingHorizontal="10dp"
+            android:text="@string/editor_save_all"
+            android:textAllCaps="false"
+            android:textColor="#06150E"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            app:backgroundTint="#10B981"
+            app:cornerRadius="8dp" />
+
+        <ImageButton
+            android:id="@+id/btn_editor_run"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/editor_run"
+            android:src="@drawable/ic_workspace_play"
+            app:tint="#F59E0B" />
+    </LinearLayout>
+
+    <!-- Hairline Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#242936" />
+
+    <!-- Pydroid-style Open File Tabs Strip -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/editor_tabs_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="46dp"
+        android:background="#12151E"
+        android:clipToPadding="false"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="4dp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#242936" />
+
+    <!-- Main Editor Area (Line Numbers + Code EditText) -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:id="@+id/editor_scroll_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <!-- Line Numbers Gutter -->
+                <TextView
+                    android:id="@+id/editor_line_numbers"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:background="#12151E"
+                    android:fontFamily="monospace"
+                    android:gravity="end|top"
+                    android:lineSpacingMultiplier="1.25"
+                    android:minWidth="42dp"
+                    android:paddingStart="6dp"
+                    android:paddingTop="12dp"
+                    android:paddingEnd="8dp"
+                    android:paddingBottom="80dp"
+                    android:text="1"
+                    android:textColor="#4B5563"
+                    android:textSize="13sp" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="match_parent"
+                    android:background="#202634" />
+
+                <!-- Horizontal Scroll for long lines or wrap toggle -->
+                <HorizontalScrollView
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:fillViewport="true">
+
+                    <EditText
+                        android:id="@+id/editor_code_input"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:background="@null"
+                        android:fontFamily="monospace"
+                        android:gravity="top|start"
+                        android:imeOptions="flagNoExtractUi"
+                        android:inputType="textMultiLine|textNoSuggestions"
+                        android:lineSpacingMultiplier="1.25"
+                        android:minWidth="320dp"
+                        android:paddingStart="10dp"
+                        android:paddingTop="12dp"
+                        android:paddingEnd="24dp"
+                        android:paddingBottom="80dp"
+                        android:scrollHorizontally="true"
+                        android:textColor="#E6EDF3"
+                        android:textCursorDrawable="@null"
+                        android:textSize="13sp" />
+                </HorizontalScrollView>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- Empty State when all tabs closed -->
+        <LinearLayout
+            android:id="@+id/editor_empty_state"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="28dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_workspace_file"
+                app:tint="#374151" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/editor_empty_title"
+                android:textColor="#E6EDF3"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="@string/editor_empty_hint"
+                android:textColor="#8B949E"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- Bottom Pydroid-style Quick Symbol & Undo/Redo Bar -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#242936" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="#161922"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageButton
+            android:id="@+id/btn_editor_undo"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Undo"
+            android:src="@drawable/ic_workspace_undo"
+            app:tint="#C9D1D9" />
+
+        <ImageButton
+            android:id="@+id/btn_editor_redo"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Redo"
+            android:src="@drawable/ic_workspace_redo"
+            app:tint="#C9D1D9" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="24dp"
+            android:background="#2B3242" />
+
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/editor_symbol_bar"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="6dp" />
+        </HorizontalScrollView>
+    </LinearLayout>
+
+</LinearLayout>

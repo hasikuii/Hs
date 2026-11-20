@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_workspace_sheet"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="16dp">
+
+    <!-- Drag Handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="12dp"
+        android:background="#3B4254" />
+
+    <!-- Header Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/workspace_menu_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/workspace_menu_title"
+                android:textColor="#F0F6FC"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/workspace_current_path"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="start"
+                android:fontFamily="monospace"
+                android:singleLine="true"
+                android:textColor="#38BDF8"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btn_nav_up"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/workspace_menu_up_desc"
+            android:src="@drawable/ic_workspace_up"
+            app:tint="#C9D1D9" />
+
+        <ImageButton
+            android:id="@+id/btn_nav_home"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/workspace_menu_home_desc"
+            android:src="@drawable/ic_workspace_home"
+            app:tint="#C9D1D9" />
+
+        <ImageButton
+            android:id="@+id/btn_nav_cd_terminal"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/workspace_menu_cd_desc"
+            android:src="@drawable/ic_workspace_terminal"
+            app:tint="#10B981" />
+
+        <ImageButton
+            android:id="@+id/btn_nav_refresh"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/workspace_menu_refresh_desc"
+            android:src="@drawable/ic_workspace_refresh"
+            app:tint="#C9D1D9" />
+    </LinearLayout>
+
+    <!-- Primary Quick Actions Bar -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_open_tree_creator"
+                style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:minHeight="48dp"
+                android:text="@string/workspace_menu_action_tree"
+                android:textAllCaps="false"
+                android:textColor="#06150E"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                app:backgroundTint="#10B981"
+                app:cornerRadius="10dp"
+                app:icon="@drawable/ic_workspace_tree"
+                app:iconSize="18dp"
+                app:iconTint="#06150E" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_batch_select_toggle"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:minHeight="48dp"
+                android:text="@string/workspace_menu_action_batch_select"
+                android:textAllCaps="false"
+                android:textColor="#38BDF8"
+                android:textSize="13sp"
+                app:cornerRadius="10dp"
+                app:icon="@drawable/ic_workspace_select_all"
+                app:iconSize="18dp"
+                app:iconTint="#38BDF8"
+                app:strokeColor="#2F4A65" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_new_file"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:minHeight="48dp"
+                android:text="@string/workspace_menu_action_new_file"
+                android:textAllCaps="false"
+                android:textColor="#E6EDF3"
+                android:textSize="13sp"
+                app:cornerRadius="10dp"
+                app:strokeColor="#2E3648" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_new_folder"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:minHeight="48dp"
+                android:text="@string/workspace_menu_action_new_folder"
+                android:textAllCaps="false"
+                android:textColor="#F59E0B"
+                android:textSize="13sp"
+                app:cornerRadius="10dp"
+                app:strokeColor="#4A3918" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- Search Input -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_workspace_input"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp">
+
+        <ImageView
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_workspace_search"
+            app:tint="#6E7681" />
+
+        <EditText
+            android:id="@+id/workspace_search_input"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@null"
+            android:hint="@string/workspace_menu_search_hint"
+            android:imeOptions="actionDone"
+            android:inputType="text"
+            android:maxLines="1"
+            android:textColor="#E6EDF3"
+            android:textColorHint="#6E7681"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- File List Container -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="340dp"
+        android:layout_marginTop="10dp">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/workspace_file_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="8dp" />
+
+        <LinearLayout
+            android:id="@+id/workspace_empty_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_workspace_folder"
+                app:tint="#4B5563" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/workspace_menu_empty"
+                android:textColor="#C9D1D9"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="@string/workspace_menu_empty_hint"
+                android:textColor="#8B949E"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- Batch Edit Footer CTA (shown when >= 1 files selected) -->
+    <LinearLayout
+        android:id="@+id/workspace_batch_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_batch_clear"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginEnd="8dp"
+            android:text="@string/editor_cancel"
+            android:textAllCaps="false"
+            android:textColor="#C9D1D9"
+            app:cornerRadius="12dp"
+            app:strokeColor="#30363D" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_selected_batch"
+            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="@string/workspace_menu_action_open_selected_none"
+            android:textAllCaps="false"
+            android:textColor="#081018"
+            android:textStyle="bold"
+            app:backgroundTint="#38BDF8"
+            app:cornerRadius="12dp" />
+    </LinearLayout>
+
+</LinearLayout>
