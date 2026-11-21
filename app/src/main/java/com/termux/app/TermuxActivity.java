@@ -31,7 +31,6 @@ import com.termux.app.api.file.FileReceiverActivity;
 import com.termux.app.terminal.TermuxActivityRootView;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
-import com.termux.app.workspace.GoogleDriveAuthHelper;
 import com.termux.app.workspace.TreeCreatorBottomSheet;
 import com.termux.app.workspace.WorkspaceEditorActivity;
 import com.termux.app.workspace.WorkspaceMenuBottomSheet;
@@ -809,8 +808,6 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             if (runCmd != null && !runCmd.isEmpty() && session != null && session.isRunning()) {
                 session.write(runCmd + "\r");
             }
-        } else if (requestCode == GoogleDriveAuthHelper.REQUEST_CODE_DRIVE_AUTH) {
-            GoogleDriveAuthHelper.getInstance().handleActivityResult(this, requestCode, resultCode, data);
         }
     }
 

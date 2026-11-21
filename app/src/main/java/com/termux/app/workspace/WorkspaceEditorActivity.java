@@ -446,14 +446,6 @@ public class WorkspaceEditorActivity extends AppCompatActivity {
         return null;
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == GoogleDriveAuthHelper.REQUEST_CODE_DRIVE_AUTH) {
-            GoogleDriveAuthHelper.getInstance().handleActivityResult(this, requestCode, resultCode, data);
-        }
-    }
-
     private void openFileBrowserToAddTabs() {
         saveCurrentEditorStateToTab();
         File startDir = WorkspaceSessionStore.getInstance().getRememberedDirectory(this);
