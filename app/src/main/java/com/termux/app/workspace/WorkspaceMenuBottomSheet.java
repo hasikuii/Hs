@@ -86,6 +86,7 @@ public final class WorkspaceMenuBottomSheet {
     private final List<File> mFilteredEntries = new ArrayList<>();
     private final Set<String> mSelectedFilePaths = new HashSet<>();
     private boolean mBatchSelectMode = false;
+    private boolean mShowHiddenEntries = false;
     private String mFilterQuery = "";
 
     public void show(@NonNull Activity activity, @NonNull File initialDir, @NonNull HostActions hostActions) {
@@ -111,7 +112,7 @@ public final class WorkspaceMenuBottomSheet {
         MaterialButton treeBtn = root.findViewById(R.id.btn_open_tree_creator);
         MaterialButton batchToggleBtn = root.findViewById(R.id.btn_batch_select_toggle);
         MaterialButton newFileBtn = root.findViewById(R.id.btn_new_file);
-        MaterialButton driveBtn = root.findViewById(R.id.btn_open_google_drive);
+        MaterialButton toolsBtn = root.findViewById(R.id.btn_open_file_tools);
         MaterialButton newFolderBtn = root.findViewById(R.id.btn_new_folder);
 
         EditText searchInput = root.findViewById(R.id.workspace_search_input);
@@ -261,7 +262,7 @@ public final class WorkspaceMenuBottomSheet {
                 }
             }));
 
-        driveBtn.setOnClickListener(v -> new GoogleDriveManagerSheet().show(activity, mCurrentDir, reloadDirectory));
+        toolsBtn.setOnClickListener(v -> showAdvancedTools(activity, reloadDirectory, adapter));
 
         batchToggleBtn.setOnClickListener(v -> {
             mBatchSelectMode = !mBatchSelectMode;
@@ -413,6 +414,54 @@ public final class WorkspaceMenuBottomSheet {
         dialog.show();
     }
 
+
+    private void showAdvancedTools(@NonNull Activity activity, @NonNull Runnable reloadDirectory,
+                                   @NonNull RecyclerView.Adapter<?> adapter) {
+        final String[] actions = {
+            "Sắp xếp: tên A → Z", "Sắp xếp: tên Z → A",
+            "Sắp xếp: dung lượng lớn → nhỏ", "Sắp xếp: dung lượng nhỏ → lớn",
+            "Sắp xếp: mới sửa gần đây", "Sắp xếp: cũ sửa trước",
+            mShowHiddenEntries ? "Ẩn tệp ẩn" : "Hiện tệp ẩn",
+            "Sao chép đường dẫn thư mục",
+            "Chọn tất cả mục đang hiển thị", "Đảo ngược lựa chọn"
+        };
+        new AlertDialog.Builder(activity).setTitle("Công cụ quản lý tệp")
+            .setItems(actions, (d, which) -> {
+                switch (which) {
+                    case 0: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,a.getName().compareToIgnoreCase(b.getName()))); break;
+                    case 1: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,b.getName().compareToIgnoreCase(a.getName()))); break;
+                    case 2: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(b.length(),a.length()))); break;
+                    case 3: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(a.length(),b.length()))); break;
+                    case 4: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(b.lastModified(),a.lastModified()))); break;
+                    case 5: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(a.lastModified(),b.lastModified()))); break;
+                    case 6: mShowHiddenEntries = !mShowHiddenEntries; reloadDirectory.run(); return;
+                    case 7:
+                        android.content.ClipboardManager cm = (android.content.ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (cm != null) {
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("folder_path", mCurrentDir.getAbsolutePath()));
+                            Toast.makeText(activity, "Đã sao chép đường dẫn thư mục", Toast.LENGTH_SHORT).show();
+                        }
+                        return;
+                    case 8:
+                        for (File f : mFilteredEntries) mSelectedFilePaths.add(f.getAbsolutePath());
+                        mBatchSelectMode = true; break;
+                    case 9:
+                        for (File f : mFilteredEntries) {
+                            String p = f.getAbsolutePath();
+                            if (!mSelectedFilePaths.remove(p)) mSelectedFilePaths.add(p);
+                        }
+                        mBatchSelectMode = true; break;
+                }
+                applyFilter();
+                adapter.notifyDataSetChanged();
+            }).show();
+    }
+
+    private static int compareDirsThen(@NonNull File a, @NonNull File b, int value) {
+        if (a.isDirectory() != b.isDirectory()) return a.isDirectory() ? -1 : 1;
+        return value;
+    }
+
     @NonNull
     private List<File> collectSelectedEntries() {
         List<File> list = new ArrayList<>();
@@ -438,7 +487,9 @@ public final class WorkspaceMenuBottomSheet {
         mAllEntries.clear();
         File[] children = mCurrentDir.listFiles();
         if (children == null) return;
-        Collections.addAll(mAllEntries, children);
+        for (File child : children) {
+            if (mShowHiddenEntries || !child.isHidden()) mAllEntries.add(child);
+        }
         Collections.sort(mAllEntries, (a, b) -> {
             if (a.isDirectory() != b.isDirectory()) {
                 return a.isDirectory() ? -1 : 1;

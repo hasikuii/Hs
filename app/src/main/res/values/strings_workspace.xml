@@ -70,7 +70,7 @@
     <string name="editor_back_desc">Quay lại Terminal</string>
 
     <!-- ZArchiver / RAR & Clipboard -->
-    <string name="workspace_menu_action_drive">Google Drive</string>
+    <string name="workspace_menu_action_tools">Công cụ nâng cao</string>
     <string name="workspace_menu_action_copy">Sao chép (%d)</string>
     <string name="workspace_menu_action_compress">Nén (%d)</string>
     <string name="workspace_clipboard_copy_info">Đang sao chép %1$d mục</string>
@@ -89,16 +89,4 @@
     <string name="workspace_item_copy_path">Sao chép đường dẫn</string>
     <string name="workspace_item_details">Chi tiết &amp; dung lượng</string>
 
-    <!-- Google Drive Manager -->
-    <string name="drive_title">Google Drive</string>
-    <string name="drive_not_connected">Chưa kết nối tài khoản Google</string>
-    <string name="drive_connect_btn">Kết nối</string>
-    <string name="drive_disconnect_btn">Ngắt kết nối</string>
-    <string name="drive_backup_folder_zip">Sao lưu thư mục (.zip)</string>
-    <string name="drive_upload_files_folders">Upload tệp / thư mục</string>
-    <string name="drive_new_folder">+ Thư mục Drive</string>
-    <string name="drive_search_hint">Tìm kiếm trên Google Drive…</string>
-    <string name="drive_empty_prompt">Thư mục Drive trống hoặc chưa kết nối.</string>
-    <string name="drive_download_selected">Tải về (%d)</string>
-    <string name="drive_delete_selected">Xóa (%d)</string>
 </resources>

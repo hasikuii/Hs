@@ -34,9 +34,6 @@ android {
         implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
         implementation "io.noties.markwon:linkify:$markwonVersion"
         implementation "io.noties.markwon:recycler:$markwonVersion"
-        implementation "com.google.android.gms:play-services-auth:21.3.0"
-        implementation 'com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava'
-
         implementation project(":terminal-view")
         implementation project(":termux-shared")
     }

@@ -150,22 +150,22 @@
                 app:strokeColor="#2E3648" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_open_google_drive"
+                android:id="@+id/btn_open_file_tools"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="44dp"
                 android:layout_marginEnd="8dp"
                 android:minHeight="48dp"
-                android:text="@string/workspace_menu_action_drive"
+                android:text="@string/workspace_menu_action_tools"
                 android:textAllCaps="false"
-                android:textColor="#60A5FA"
+                android:textColor="#A78BFA"
                 android:textSize="13sp"
                 android:textStyle="bold"
                 app:cornerRadius="10dp"
-                app:icon="@drawable/ic_workspace_drive"
+                app:icon="@drawable/ic_workspace_more"
                 app:iconSize="18dp"
                 app:iconTint="#60A5FA"
-                app:strokeColor="#254068" />
+                app:strokeColor="#3F3169" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_new_folder"
