@@ -2,6 +2,8 @@ package com.termux.app.workspace;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -32,6 +34,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.button.MaterialButton;
 import com.termux.R;
+import com.termux.app.TermuxActivity;
 import com.termux.shared.termux.TermuxConstants;
 
 import java.io.File;
@@ -484,6 +487,18 @@ public class WorkspaceEditorActivity extends AppCompatActivity {
             @Override
             public void onSendCdCommandToTerminal(@NonNull File targetDir) {
                 mBaseDir = targetDir;
+            }
+
+            @Override
+            public void onRunCommandInTerminal(@NonNull String command) {
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Termux package install", command));
+                    Toast.makeText(this, "Đã sao chép lệnh. Mở Terminal và dán để cài package.", Toast.LENGTH_LONG).show();
+                    TermuxActivity.startTermuxActivity(this);
+                } else {
+                    Toast.makeText(this, "Không thể sao chép lệnh cài đặt", Toast.LENGTH_LONG).show();
+                }
             }
         });
     }
