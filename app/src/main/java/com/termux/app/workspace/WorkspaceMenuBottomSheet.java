@@ -213,9 +213,11 @@ public final class WorkspaceMenuBottomSheet {
 
         Runnable reloadDirectory = () -> {
             pathText.setText(mShowingFavorites ? "★ " + activity.getString(R.string.workspace_favorites_title) : mCurrentDir.getAbsolutePath());
-            favoritesBtn.setText(mShowingFavorites
-                ? R.string.workspace_favorites_back
-                : activity.getString(R.string.workspace_favorites_button, mFavoritePaths.size()));
+            if (mShowingFavorites) {
+                favoritesBtn.setText(R.string.workspace_favorites_back);
+            } else {
+                favoritesBtn.setText(activity.getString(R.string.workspace_favorites_button, mFavoritePaths.size()));
+            }
             store.setCurrentDirectory(activity, mCurrentDir);
             loadDirectoryEntries();
             applyFilter();
@@ -241,13 +243,15 @@ public final class WorkspaceMenuBottomSheet {
                 } else if (isPreviewableMedia(item)) {
                     openMediaPreview(activity, item);
                 } else if (WorkspaceArchiveHelper.isArchiveFile(item)) {
-                    WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, item, mCurrentDir, reloadDirectory, () -> {
+                    File itemParent = item.getParentFile() != null ? item.getParentFile() : mCurrentDir;
+                    WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, item, itemParent, reloadDirectory, () -> {
                         dialog.dismiss();
-                        hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), mCurrentDir);
+                        hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), itemParent);
                     });
                 } else {
                     dialog.dismiss();
-                    hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), mCurrentDir);
+                    File itemParent = item.getParentFile() != null ? item.getParentFile() : mCurrentDir;
+                    hostActions.onOpenFilesInBatchEditor(Collections.singletonList(item), itemParent);
                 }
             }
 
@@ -670,6 +674,7 @@ public final class WorkspaceMenuBottomSheet {
         popup.getMenu().add(0, MENU_DELETE, order, "Xóa");
 
         WorkspaceSessionStore store = WorkspaceSessionStore.getInstance();
+        File itemParent = item.getParentFile() != null ? item.getParentFile() : mCurrentDir;
         popup.setOnMenuItemClickListener(menuItem -> {
             int id = menuItem.getItemId();
             if (id == MENU_OPEN) {
@@ -703,10 +708,10 @@ public final class WorkspaceMenuBottomSheet {
                 WorkspaceArchiveDialogs.showArchiveContentsDialog(activity, item, mCurrentDir, reloadDirectory);
                 return true;
             } else if (id == MENU_ARCHIVE_EXTRACT_HERE) {
-                WorkspaceArchiveDialogs.runExtract(activity, item, mCurrentDir, reloadDirectory);
+                WorkspaceArchiveDialogs.runExtract(activity, item, itemParent, reloadDirectory);
                 return true;
             } else if (id == MENU_ARCHIVE_EXTRACT_SUB) {
-                File sub = new File(mCurrentDir, WorkspaceArchiveHelper.stripArchiveExtension(item.getName()));
+                File sub = new File(itemParent, WorkspaceArchiveHelper.stripArchiveExtension(item.getName()));
                 WorkspaceArchiveDialogs.runExtract(activity, item, sub, reloadDirectory);
                 return true;
             } else if (id == MENU_COPY) {
@@ -720,11 +725,11 @@ public final class WorkspaceMenuBottomSheet {
                 Toast.makeText(activity, "Đã cắt \"" + item.getName() + "\" — chọn thư mục và bấm Dán tại đây", Toast.LENGTH_SHORT).show();
                 return true;
             } else if (id == MENU_COPY_TO) {
-                WorkspaceMoveHelper.showCopyDestinationPicker(activity, Collections.singletonList(item), mCurrentDir,
+                WorkspaceMoveHelper.showCopyDestinationPicker(activity, Collections.singletonList(item), itemParent,
                     (targetDir, copiedCount) -> reloadDirectory.run());
                 return true;
             } else if (id == MENU_MOVE_TO) {
-                WorkspaceMoveHelper.showDestinationPicker(activity, Collections.singletonList(item), mCurrentDir,
+                WorkspaceMoveHelper.showDestinationPicker(activity, Collections.singletonList(item), itemParent,
                     (targetDir, movedCount) -> {
                         mSelectedFilePaths.remove(item.getAbsolutePath());
                         reloadDirectory.run();
@@ -746,7 +751,7 @@ public final class WorkspaceMenuBottomSheet {
                 });
                 return true;
             } else if (id == MENU_COMPRESS) {
-                WorkspaceArchiveDialogs.showCompressDialog(activity, Collections.singletonList(item), mCurrentDir, reloadDirectory);
+                WorkspaceArchiveDialogs.showCompressDialog(activity, Collections.singletonList(item), itemParent, reloadDirectory);
                 return true;
             } else if (id == MENU_RENAME) {
                 promptCreateName(activity, "Đổi tên", item.getName(), newName -> {
