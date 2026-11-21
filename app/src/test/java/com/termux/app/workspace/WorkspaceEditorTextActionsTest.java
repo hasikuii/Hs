@@ -49,7 +49,7 @@ public class WorkspaceEditorTextActionsTest {
 
     @Test
     public void forwardAndBackwardSearchWrapAndIgnoreCase() {
-        assertEquals(0, WorkspaceEditorTextActions.findNext("Alpha beta ALPHA", "alpha", 7, false));
-        assertEquals(0, WorkspaceEditorTextActions.findNext("Alpha beta ALPHA", "alpha", 13, true));
+        assertEquals(0, WorkspaceEditorTextActions.findNext("Alpha beta ALPHA", "alpha", 12, false));
+        assertEquals(0, WorkspaceEditorTextActions.findNext("Alpha beta ALPHA", "alpha", 11, true));
     }
 }
