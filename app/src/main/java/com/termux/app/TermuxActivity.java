@@ -1045,6 +1045,11 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             public void onSendCdCommandToTerminal(@NonNull File targetDir) {
                 sendCdCommandToCurrentSession(targetDir);
             }
+
+            @Override
+            public void onRunCommandInTerminal(@NonNull String command) {
+                sendCommandToCurrentSession(command);
+            }
         });
     }
 
@@ -1067,6 +1072,15 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
         if (session != null && session.isRunning()) {
             String quoted = "'" + targetDir.getAbsolutePath().replace("'", "'\"'\"'") + "'";
             session.write("cd " + quoted + "\r");
+        }
+    }
+
+    private void sendCommandToCurrentSession(@NonNull String command) {
+        TerminalSession session = getCurrentSession();
+        if (session != null && session.isRunning()) {
+            session.write(command + "\r");
+        } else {
+            Logger.showToast(this, "Không có phiên Terminal đang chạy", true);
         }
     }
 
