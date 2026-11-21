@@ -59,7 +59,6 @@ public final class WorkspaceMenuBottomSheet {
     public interface HostActions {
         void onOpenFilesInBatchEditor(@NonNull List<File> files, @NonNull File currentDir);
         void onSendCdCommandToTerminal(@NonNull File targetDir);
-        void onRunCommandInTerminal(@NonNull String command);
     }
 
     private interface FileItemListener {
@@ -519,8 +518,7 @@ public final class WorkspaceMenuBottomSheet {
             mShowHiddenEntries ? "Ẩn tệp ẩn" : "Hiện tệp ẩn",
             "Sao chép đường dẫn thư mục",
             "Chọn tất cả mục đang hiển thị", "Đảo ngược lựa chọn",
-            "Tìm kiếm sâu trong thư mục và thư mục con",
-            "Trung tâm package Android"
+            "Tìm kiếm sâu trong thư mục và thư mục con"
         };
         new AlertDialog.Builder(activity).setTitle("Công cụ quản lý tệp")
             .setItems(actions, (d, which) -> {
@@ -548,9 +546,6 @@ public final class WorkspaceMenuBottomSheet {
                             if (!mSelectedFilePaths.remove(p)) mSelectedFilePaths.add(p);
                         }
                         mBatchSelectMode = true; break;
-                    case 11:
-                        WorkspacePackageCenter.show(activity, hostActions::onRunCommandInTerminal);
-                        return;
                     case 10:
                         showRecursiveSearchDialog(activity, mCurrentDir, result -> {
                             if (result.isDirectory()) {
