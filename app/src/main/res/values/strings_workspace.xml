@@ -68,6 +68,7 @@
     <string name="editor_replaced_count">Đã thay thế %1$d vị trí</string>
     <string name="editor_close_tab_desc">Đóng tab</string>
     <string name="editor_back_desc">Quay lại Terminal</string>
+    <string name="editor_nano_tools">Nano</string>
 
     <!-- ZArchiver / RAR & Clipboard -->
     <string name="workspace_menu_action_tools">Công cụ nâng cao</string>

@@ -8,6 +8,8 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.net.Uri;
+import android.text.InputType;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -49,6 +51,20 @@ public class WorkspaceEditorActivity extends AppCompatActivity {
     public static final String EXTRA_FILES = "workspace_extra_files";
     public static final String EXTRA_BASE_DIR = "workspace_extra_base_dir";
     public static final String EXTRA_RUN_COMMAND = "workspace_result_run_command";
+
+    private static final int TOOL_FIND = 201;
+    private static final int TOOL_FIND_NEXT = 202;
+    private static final int TOOL_FIND_PREVIOUS = 203;
+    private static final int TOOL_GO_TO_LINE = 204;
+    private static final int TOOL_DUPLICATE = 205;
+    private static final int TOOL_INDENT = 206;
+    private static final int TOOL_UNINDENT = 207;
+    private static final int TOOL_COMMENT = 208;
+    private static final int TOOL_LINE_NUMBERS = 209;
+    private static final int TOOL_STATISTICS = 210;
+    private static final int TOOL_NANO_HELP = 211;
+
+    private String mLastFindQuery = "";
 
     private static final String[] QUICK_SYMBOLS = new String[] {
         "TAB", "()", "{}", "[]", ":", ";", "=", "\"", "'", "#", "/", "_", "<", ">", ".", ","
@@ -106,6 +122,7 @@ public class WorkspaceEditorActivity extends AppCompatActivity {
         findViewById(R.id.btn_editor_find).setOnClickListener(v -> showFindAndReplaceDialog());
         findViewById(R.id.btn_editor_undo).setOnClickListener(v -> performUndo());
         findViewById(R.id.btn_editor_redo).setOnClickListener(v -> performRedo());
+        findViewById(R.id.btn_editor_nano_tools).setOnClickListener(this::showNanoToolsMenu);
 
         mSaveBtn.setOnClickListener(v -> saveActiveTab());
         mSaveAllBtn.setOnClickListener(v -> saveAllTabs());
@@ -526,6 +543,309 @@ public class WorkspaceEditorActivity extends AppCompatActivity {
             idx += sub.length();
         }
         return count;
+    }
+
+    private void showNanoToolsMenu(@NonNull View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add(0, TOOL_FIND, 0, "Tìm trong tệp…");
+        popup.getMenu().add(0, TOOL_FIND_NEXT, 1, "Tìm tiếp");
+        popup.getMenu().add(0, TOOL_FIND_PREVIOUS, 2, "Tìm ngược");
+        popup.getMenu().add(0, TOOL_GO_TO_LINE, 3, "Đi tới dòng…");
+        popup.getMenu().add(0, TOOL_DUPLICATE, 4, "Nhân đôi dòng / vùng chọn");
+        popup.getMenu().add(0, TOOL_INDENT, 5, "Thụt lề (4 dấu cách)");
+        popup.getMenu().add(0, TOOL_UNINDENT, 6, "Bỏ thụt lề");
+        popup.getMenu().add(0, TOOL_COMMENT, 7, "Comment / Uncomment");
+        popup.getMenu().add(0, TOOL_LINE_NUMBERS, 8,
+            mLineNumbersView.getVisibility() == View.VISIBLE ? "Ẩn số dòng" : "Hiện số dòng");
+        popup.getMenu().add(0, TOOL_STATISTICS, 9, "Vị trí con trỏ & thống kê");
+        popup.getMenu().add(0, TOOL_NANO_HELP, 10, "Hướng dẫn sử dụng Nano");
+        popup.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case TOOL_FIND:
+                    showFindNextDialog(false);
+                    return true;
+                case TOOL_FIND_NEXT:
+                    searchNextOccurrence(false);
+                    return true;
+                case TOOL_FIND_PREVIOUS:
+                    searchNextOccurrence(true);
+                    return true;
+                case TOOL_GO_TO_LINE:
+                    showGoToLineDialog();
+                    return true;
+                case TOOL_DUPLICATE:
+                    duplicateCurrentLines();
+                    return true;
+                case TOOL_INDENT:
+                    transformCurrentLines(false);
+                    return true;
+                case TOOL_UNINDENT:
+                    transformCurrentLines(true);
+                    return true;
+                case TOOL_COMMENT:
+                    toggleCurrentLineComments();
+                    return true;
+                case TOOL_LINE_NUMBERS:
+                    boolean visible = mLineNumbersView.getVisibility() == View.VISIBLE;
+                    mLineNumbersView.setVisibility(visible ? View.GONE : View.VISIBLE);
+                    return true;
+                case TOOL_STATISTICS:
+                    showEditorStatistics();
+                    return true;
+                case TOOL_NANO_HELP:
+                    showNanoHelpDialog();
+                    return true;
+                default:
+                    return false;
+            }
+        });
+        popup.show();
+    }
+
+    private void showFindNextDialog(boolean backwards) {
+        WorkspaceSessionStore.OpenFileTab tab = WorkspaceSessionStore.getInstance().getActiveTab();
+        if (tab == null) return;
+
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Nhập từ khóa cần tìm");
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        if (mCodeInput.getSelectionStart() >= 0 &&
+            mCodeInput.getSelectionEnd() > mCodeInput.getSelectionStart()) {
+            String selected = mCodeInput.getText().subSequence(
+                mCodeInput.getSelectionStart(), mCodeInput.getSelectionEnd()).toString();
+            if (!selected.contains("\n") && selected.length() <= 120) {
+                input.setText(selected);
+            } else {
+                input.setText(mLastFindQuery);
+            }
+        } else {
+            input.setText(mLastFindQuery);
+        }
+        input.setSelection(input.length());
+
+        new AlertDialog.Builder(this)
+            .setTitle(backwards ? "Tìm ngược trong tệp" : "Tìm trong tệp hiện tại")
+            .setView(input)
+            .setPositiveButton("Tìm", (dialog, which) -> {
+                mLastFindQuery = input.getText().toString();
+                searchNextOccurrence(backwards);
+            })
+            .setNegativeButton(R.string.editor_cancel, null)
+            .show();
+    }
+
+    private void searchNextOccurrence(boolean backwards) {
+        WorkspaceSessionStore.OpenFileTab tab = WorkspaceSessionStore.getInstance().getActiveTab();
+        if (tab == null) return;
+        if (mLastFindQuery == null || mLastFindQuery.isEmpty()) {
+            showFindNextDialog(backwards);
+            return;
+        }
+
+        int selectionStart = Math.max(0, mCodeInput.getSelectionStart());
+        int selectionEnd = Math.max(selectionStart, mCodeInput.getSelectionEnd());
+        int from = backwards ? selectionStart : selectionEnd;
+        int match = WorkspaceEditorTextActions.findNext(
+            mCodeInput.getText().toString(), mLastFindQuery, from, backwards);
+        if (match < 0) {
+            Toast.makeText(this, "Không tìm thấy: " + mLastFindQuery, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        mCodeInput.requestFocus();
+        mCodeInput.setSelection(match, Math.min(mCodeInput.length(), match + mLastFindQuery.length()));
+        scrollEditorToOffset(match);
+    }
+
+    private void showGoToLineDialog() {
+        if (WorkspaceSessionStore.getInstance().getActiveTab() == null) return;
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Số dòng, bắt đầu từ 1");
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        int currentLine = WorkspaceEditorTextActions.getLineNumber(
+            mCodeInput.getText().toString(), Math.max(0, mCodeInput.getSelectionStart()));
+        input.setText(String.valueOf(currentLine));
+        input.setSelection(input.length());
+
+        new AlertDialog.Builder(this)
+            .setTitle("Đi tới dòng")
+            .setView(input)
+            .setPositiveButton("Đi tới", (dialog, which) -> {
+                try {
+                    int line = Integer.parseInt(input.getText().toString().trim());
+                    int offset = WorkspaceEditorTextActions.lineColumnToOffset(
+                        mCodeInput.getText().toString(), line, 1);
+                    mCodeInput.requestFocus();
+                    mCodeInput.setSelection(offset);
+                    scrollEditorToOffset(offset);
+                } catch (NumberFormatException e) {
+                    Toast.makeText(this, "Số dòng không hợp lệ", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton(R.string.editor_cancel, null)
+            .show();
+    }
+
+    private void scrollEditorToOffset(int offset) {
+        mCodeInput.post(() -> {
+            android.text.Layout layout = mCodeInput.getLayout();
+            if (layout == null) return;
+            int safeOffset = Math.max(0, Math.min(offset, mCodeInput.length()));
+            int line = layout.getLineForOffset(safeOffset);
+            mEditorScroll.smoothScrollTo(0, Math.max(0, layout.getLineTop(line) - 24));
+        });
+    }
+
+    private void duplicateCurrentLines() {
+        if (WorkspaceSessionStore.getInstance().getActiveTab() == null) return;
+        WorkspaceEditorTextActions.EditResult result =
+            WorkspaceEditorTextActions.duplicateLines(
+                mCodeInput.getText().toString(),
+                Math.max(0, mCodeInput.getSelectionStart()),
+                Math.max(0, mCodeInput.getSelectionEnd()));
+        applyEditorEdit(result);
+    }
+
+    private void transformCurrentLines(boolean removeIndent) {
+        if (WorkspaceSessionStore.getInstance().getActiveTab() == null) return;
+        WorkspaceEditorTextActions.EditResult result =
+            WorkspaceEditorTextActions.indentLines(
+                mCodeInput.getText().toString(),
+                Math.max(0, mCodeInput.getSelectionStart()),
+                Math.max(0, mCodeInput.getSelectionEnd()),
+                removeIndent);
+        applyEditorEdit(result);
+    }
+
+    private void toggleCurrentLineComments() {
+        WorkspaceSessionStore.OpenFileTab tab = WorkspaceSessionStore.getInstance().getActiveTab();
+        if (tab == null) return;
+        String marker = getLineCommentMarker(tab.file.getName());
+        if (marker == null) {
+            Toast.makeText(this, "Định dạng tệp này chưa có quy tắc comment dòng", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        WorkspaceEditorTextActions.EditResult result =
+            WorkspaceEditorTextActions.toggleLineComments(
+                mCodeInput.getText().toString(),
+                Math.max(0, mCodeInput.getSelectionStart()),
+                Math.max(0, mCodeInput.getSelectionEnd()),
+                marker);
+        applyEditorEdit(result);
+    }
+
+    @Nullable
+    private static String getLineCommentMarker(@NonNull String fileName) {
+        String name = fileName.toLowerCase(Locale.ROOT);
+        if (name.endsWith(".py") || name.endsWith(".pyw") ||
+            name.endsWith(".sh") || name.endsWith(".bash") ||
+            name.endsWith(".zsh") || name.endsWith(".fish") ||
+            name.endsWith(".rb") || name.endsWith(".pl") ||
+            name.endsWith(".yaml") || name.endsWith(".yml") ||
+            name.endsWith(".toml") || name.endsWith(".ini") ||
+            name.endsWith(".conf") || name.endsWith(".properties") ||
+            name.endsWith(".env") || name.endsWith(".r")) {
+            return "#";
+        }
+        if (name.endsWith(".java") || name.endsWith(".kt") || name.endsWith(".kts") ||
+            name.endsWith(".js") || name.endsWith(".jsx") ||
+            name.endsWith(".ts") || name.endsWith(".tsx") ||
+            name.endsWith(".c") || name.endsWith(".h") ||
+            name.endsWith(".cpp") || name.endsWith(".hpp") ||
+            name.endsWith(".cs") || name.endsWith(".go") ||
+            name.endsWith(".rs") || name.endsWith(".swift")) {
+            return "//";
+        }
+        if (name.endsWith(".sql") || name.endsWith(".lua") || name.endsWith(".hs")) {
+            return "--";
+        }
+        return null;
+    }
+
+    private void applyEditorEdit(@NonNull WorkspaceEditorTextActions.EditResult result) {
+        if (result.text.equals(mCodeInput.getText().toString())) return;
+        mCodeInput.setText(result.text);
+        int start = Math.max(0, Math.min(result.selectionStart, mCodeInput.length()));
+        int end = Math.max(start, Math.min(result.selectionEnd, mCodeInput.length()));
+        mCodeInput.setSelection(start, end);
+        mCodeInput.requestFocus();
+    }
+
+    private void showEditorStatistics() {
+        String text = mCodeInput.getText() != null ? mCodeInput.getText().toString() : "";
+        int cursor = Math.max(0, mCodeInput.getSelectionStart());
+        int line = WorkspaceEditorTextActions.getLineNumber(text, cursor);
+        int column = WorkspaceEditorTextActions.getColumnNumber(text, cursor);
+        int lines = WorkspaceEditorTextActions.getLineCount(text);
+        int words = WorkspaceEditorTextActions.getWordCount(text);
+        String message = "Dòng: " + line + " / " + lines +
+            "\nCột: " + column +
+            "\nTừ: " + words +
+            "\nKý tự: " + text.length();
+        new AlertDialog.Builder(this)
+            .setTitle("Vị trí & thống kê văn bản")
+            .setMessage(message)
+            .setPositiveButton("Đóng", null)
+            .show();
+    }
+
+    private void showNanoHelpDialog() {
+        String help =
+            "GNU Nano 9.3 – hướng dẫn nhanh\n\n" +
+            "Mở tệp trong Termux:\n" +
+            "  pkg install nano\n" +
+            "  nano ten_tep.py\n" +
+            "  nano +25 ten_tep.py   (mở tại dòng 25)\n\n" +
+            "Các phím tắt Nano:\n" +
+            "  Ctrl+S   Lưu buffer\n" +
+            "  Ctrl+O   Ghi tệp / Save As\n" +
+            "  Ctrl+R   Chèn nội dung từ tệp khác\n" +
+            "  Ctrl+X   Thoát Nano\n" +
+            "  Ctrl+F   Tìm về phía trước (Nano 8+)\n" +
+            "  Ctrl+B   Tìm về phía sau (Nano 8+)\n" +
+            "  Alt+R    Tìm và thay thế\n" +
+            "  Alt+F    Tìm kết quả tiếp theo\n" +
+            "  Ctrl+K   Cắt dòng hoặc vùng đã đánh dấu\n" +
+            "  Alt+6    Sao chép dòng/vùng\n" +
+            "  Ctrl+U   Dán cutbuffer\n" +
+            "  Alt+U    Undo     Alt+E: Redo\n" +
+            "  Alt+G    Đi tới dòng\n" +
+            "  Alt+3    Comment / Uncomment\n" +
+            "  Ctrl+C   Hiện vị trí con trỏ\n" +
+            "  Ctrl+G   Mở trợ giúp trong Nano\n\n" +
+            "Trong editor Hs, các thao tác tương ứng nằm trong menu Nano ở thanh dưới. " +
+            "Đây là trình soạn thảo Android riêng, không phải giao diện GNU Nano terminal; các phím tắt trên dùng khi chạy lệnh nano trong Termux.\n\n" +
+            "Tài liệu và phím tắt được duy trì tại nano-editor.org.";
+        TextView body = new TextView(this);
+        body.setText(help);
+        body.setTextColor(Color.parseColor("#E6EDF3"));
+        body.setTextSize(14);
+        body.setTextIsSelectable(true);
+        float density = getResources().getDisplayMetrics().density;
+        int padding = (int) (16 * density);
+        body.setPadding(padding, padding, padding, padding);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
+
+        new AlertDialog.Builder(this)
+            .setTitle("Hướng dẫn GNU Nano")
+            .setView(scroll)
+            .setPositiveButton("Phím tắt chính thức", (dialog, which) ->
+                openNanoDocumentation("https://www.nano-editor.org/dist/latest/cheatsheet.html"))
+            .setNeutralButton("Sổ tay đầy đủ", (dialog, which) ->
+                openNanoDocumentation("https://www.nano-editor.org/dist/latest/nano.html"))
+            .setNegativeButton("Đóng", null)
+            .show();
+    }
+
+    private void openNanoDocumentation(@NonNull String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception e) {
+            Toast.makeText(this, "Không mở được trình duyệt: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     @Override
