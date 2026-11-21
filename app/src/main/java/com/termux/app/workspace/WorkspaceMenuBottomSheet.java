@@ -2,7 +2,9 @@ package com.termux.app.workspace;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,6 +13,8 @@ import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.MimeTypeMap;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -21,6 +25,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -42,6 +47,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Extra-key Workspace Menu displaying the files and folders in the current directory,
@@ -77,6 +83,10 @@ public final class WorkspaceMenuBottomSheet {
     private static final int MENU_COMPRESS = 14;
     private static final int MENU_COPY_PATH = 15;
     private static final int MENU_DETAILS = 16;
+    private static final int MENU_PREVIEW = 17;
+    private static final int MENU_FAVORITE = 18;
+    private static final String FAVORITES_PREFS = "workspace_file_manager";
+    private static final String FAVORITES_KEY = "favorite_paths";
 
     private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
@@ -87,6 +97,8 @@ public final class WorkspaceMenuBottomSheet {
     private final Set<String> mSelectedFilePaths = new HashSet<>();
     private boolean mBatchSelectMode = false;
     private boolean mShowHiddenEntries = false;
+    private boolean mShowingFavorites = false;
+    private final Set<String> mFavoritePaths = new HashSet<>();
     private String mFilterQuery = "";
 
     public void show(@NonNull Activity activity, @NonNull File initialDir, @NonNull HostActions hostActions) {
@@ -114,6 +126,10 @@ public final class WorkspaceMenuBottomSheet {
         MaterialButton newFileBtn = root.findViewById(R.id.btn_new_file);
         MaterialButton toolsBtn = root.findViewById(R.id.btn_open_file_tools);
         MaterialButton newFolderBtn = root.findViewById(R.id.btn_new_folder);
+        MaterialButton favoritesBtn = root.findViewById(R.id.btn_workspace_favorites);
+
+        loadFavoritePaths(activity);
+        mShowingFavorites = false;
 
         EditText searchInput = root.findViewById(R.id.workspace_search_input);
         RecyclerView recyclerView = root.findViewById(R.id.workspace_file_list);
@@ -196,7 +212,10 @@ public final class WorkspaceMenuBottomSheet {
         };
 
         Runnable reloadDirectory = () -> {
-            pathText.setText(mCurrentDir.getAbsolutePath());
+            pathText.setText(mShowingFavorites ? "★ " + activity.getString(R.string.workspace_favorites_title) : mCurrentDir.getAbsolutePath());
+            favoritesBtn.setText(mShowingFavorites
+                ? R.string.workspace_favorites_back
+                : activity.getString(R.string.workspace_favorites_button, mFavoritePaths.size()));
             store.setCurrentDirectory(activity, mCurrentDir);
             loadDirectoryEntries();
             applyFilter();
@@ -210,6 +229,7 @@ public final class WorkspaceMenuBottomSheet {
             @Override
             public void onItemClick(@NonNull File item) {
                 if (item.isDirectory()) {
+                    mShowingFavorites = false;
                     mCurrentDir = item;
                     mFilterQuery = "";
                     searchInput.setText("");
@@ -218,6 +238,8 @@ public final class WorkspaceMenuBottomSheet {
                     toggleSelection(item);
                     adapter.notifyDataSetChanged();
                     updateBatchBar.run();
+                } else if (isPreviewableMedia(item)) {
+                    openMediaPreview(activity, item);
                 } else if (WorkspaceArchiveHelper.isArchiveFile(item)) {
                     WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, item, mCurrentDir, reloadDirectory, () -> {
                         dialog.dismiss();
@@ -241,7 +263,15 @@ public final class WorkspaceMenuBottomSheet {
             }
         });
 
+        favoritesBtn.setOnClickListener(v -> {
+            mShowingFavorites = !mShowingFavorites;
+            mFilterQuery = "";
+            searchInput.setText("");
+            reloadDirectory.run();
+        });
+
         upBtn.setOnClickListener(v -> {
+            mShowingFavorites = false;
             File parent = mCurrentDir.getParentFile();
             if (parent != null && parent.canRead()) {
                 mCurrentDir = parent;
@@ -250,6 +280,7 @@ public final class WorkspaceMenuBottomSheet {
         });
 
         homeBtn.setOnClickListener(v -> {
+            mShowingFavorites = false;
             mCurrentDir = TermuxConstants.TERMUX_HOME_DIR;
             reloadDirectory.run();
         });
@@ -271,7 +302,7 @@ public final class WorkspaceMenuBottomSheet {
                 }
             }));
 
-        toolsBtn.setOnClickListener(v -> showAdvancedTools(activity, reloadDirectory, adapter));
+        toolsBtn.setOnClickListener(v -> showAdvancedTools(activity, reloadDirectory, adapter, dialog, hostActions));
 
         batchToggleBtn.setOnClickListener(v -> {
             mBatchSelectMode = !mBatchSelectMode;
@@ -473,14 +504,17 @@ public final class WorkspaceMenuBottomSheet {
 
 
     private void showAdvancedTools(@NonNull Activity activity, @NonNull Runnable reloadDirectory,
-                                   @NonNull RecyclerView.Adapter<?> adapter) {
+                                   @NonNull RecyclerView.Adapter<?> adapter,
+                                   @NonNull BottomSheetDialog parentDialog,
+                                   @NonNull HostActions hostActions) {
         final String[] actions = {
             "Sắp xếp: tên A → Z", "Sắp xếp: tên Z → A",
             "Sắp xếp: dung lượng lớn → nhỏ", "Sắp xếp: dung lượng nhỏ → lớn",
             "Sắp xếp: mới sửa gần đây", "Sắp xếp: cũ sửa trước",
             mShowHiddenEntries ? "Ẩn tệp ẩn" : "Hiện tệp ẩn",
             "Sao chép đường dẫn thư mục",
-            "Chọn tất cả mục đang hiển thị", "Đảo ngược lựa chọn"
+            "Chọn tất cả mục đang hiển thị", "Đảo ngược lựa chọn",
+            "Tìm kiếm sâu trong thư mục và thư mục con"
         };
         new AlertDialog.Builder(activity).setTitle("Công cụ quản lý tệp")
             .setItems(actions, (d, which) -> {
@@ -508,6 +542,28 @@ public final class WorkspaceMenuBottomSheet {
                             if (!mSelectedFilePaths.remove(p)) mSelectedFilePaths.add(p);
                         }
                         mBatchSelectMode = true; break;
+                    case 10:
+                        showRecursiveSearchDialog(activity, mCurrentDir, result -> {
+                            if (result.isDirectory()) {
+                                mShowingFavorites = false;
+                                mCurrentDir = result;
+                                reloadDirectory.run();
+                            } else if (isPreviewableMedia(result)) {
+                                openMediaPreview(activity, result);
+                            } else if (WorkspaceArchiveHelper.isArchiveFile(result)) {
+                                WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, result,
+                                    result.getParentFile(), reloadDirectory, () -> {
+                                        parentDialog.dismiss();
+                                        hostActions.onOpenFilesInBatchEditor(
+                                            Collections.singletonList(result), result.getParentFile());
+                                    });
+                            } else {
+                                parentDialog.dismiss();
+                                hostActions.onOpenFilesInBatchEditor(
+                                    Collections.singletonList(result), result.getParentFile());
+                            }
+                        });
+                        return;
                 }
                 applyFilter();
                 adapter.notifyDataSetChanged();
@@ -542,10 +598,19 @@ public final class WorkspaceMenuBottomSheet {
 
     private void loadDirectoryEntries() {
         mAllEntries.clear();
-        File[] children = mCurrentDir.listFiles();
-        if (children == null) return;
-        for (File child : children) {
-            if (mShowHiddenEntries || !child.isHidden()) mAllEntries.add(child);
+        if (mShowingFavorites) {
+            for (String path : mFavoritePaths) {
+                File favorite = new File(path);
+                if (favorite.exists() && (mShowHiddenEntries || !favorite.isHidden())) {
+                    mAllEntries.add(favorite);
+                }
+            }
+        } else {
+            File[] children = mCurrentDir.listFiles();
+            if (children == null) return;
+            for (File child : children) {
+                if (mShowHiddenEntries || !child.isHidden()) mAllEntries.add(child);
+            }
         }
         Collections.sort(mAllEntries, (a, b) -> {
             if (a.isDirectory() != b.isDirectory()) {
@@ -594,6 +659,12 @@ public final class WorkspaceMenuBottomSheet {
         popup.getMenu().add(0, MENU_DUPLICATE, order++, R.string.workspace_item_duplicate);
         popup.getMenu().add(0, MENU_COMPRESS, order++, R.string.workspace_item_compress);
         popup.getMenu().add(0, MENU_RENAME, order++, "Đổi tên");
+        if (isPreviewableMedia(item)) {
+            popup.getMenu().add(0, MENU_PREVIEW, order++, R.string.workspace_item_preview);
+        }
+        boolean isFavorite = mFavoritePaths.contains(item.getAbsolutePath());
+        popup.getMenu().add(0, MENU_FAVORITE, order++,
+            isFavorite ? R.string.workspace_favorite_remove : R.string.workspace_favorite_add);
         popup.getMenu().add(0, MENU_COPY_PATH, order++, R.string.workspace_item_copy_path);
         popup.getMenu().add(0, MENU_DETAILS, order++, R.string.workspace_item_details);
         popup.getMenu().add(0, MENU_DELETE, order, "Xóa");
@@ -692,6 +763,21 @@ public final class WorkspaceMenuBottomSheet {
                     }
                 });
                 return true;
+            } else if (id == MENU_PREVIEW) {
+                openMediaPreview(activity, item);
+                return true;
+            } else if (id == MENU_FAVORITE) {
+                String path = item.getAbsolutePath();
+                if (mFavoritePaths.contains(path)) {
+                    mFavoritePaths.remove(path);
+                    Toast.makeText(activity, R.string.workspace_favorite_removed, Toast.LENGTH_SHORT).show();
+                } else {
+                    mFavoritePaths.add(path);
+                    Toast.makeText(activity, R.string.workspace_favorite_added, Toast.LENGTH_SHORT).show();
+                }
+                saveFavoritePaths(activity);
+                reloadDirectory.run();
+                return true;
             } else if (id == MENU_COPY_PATH) {
                 WorkspaceArchiveDialogs.copyPathToClipboard(activity, item);
                 return true;
@@ -730,6 +816,126 @@ public final class WorkspaceMenuBottomSheet {
             }
         }
         return result;
+    }
+
+    private void loadFavoritePaths(@NonNull Context context) {
+        java.util.Set<String> stored = context.getSharedPreferences(FAVORITES_PREFS, Context.MODE_PRIVATE)
+            .getStringSet(FAVORITES_KEY, Collections.emptySet());
+        mFavoritePaths.clear();
+        if (stored != null) mFavoritePaths.addAll(stored);
+    }
+
+    private void saveFavoritePaths(@NonNull Context context) {
+        context.getSharedPreferences(FAVORITES_PREFS, Context.MODE_PRIVATE)
+            .edit().putStringSet(FAVORITES_KEY, new HashSet<>(mFavoritePaths)).apply();
+    }
+
+    private interface FileResultCallback {
+        void onSelected(@NonNull File file);
+    }
+
+    private void showRecursiveSearchDialog(@NonNull Activity activity, @NonNull File root,
+                                            @NonNull FileResultCallback callback) {
+        EditText input = new EditText(activity);
+        input.setSingleLine(true);
+        input.setHint(R.string.workspace_recursive_search_hint);
+        int padding = (int) (16 * activity.getResources().getDisplayMetrics().density);
+        LinearLayout container = new LinearLayout(activity);
+        container.setPadding(padding, padding / 2, padding, 0);
+        container.addView(input, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        new AlertDialog.Builder(activity)
+            .setTitle(R.string.workspace_recursive_search_title)
+            .setMessage(activity.getString(R.string.workspace_recursive_search_root, root.getAbsolutePath()))
+            .setView(container)
+            .setPositiveButton(R.string.workspace_recursive_search_action, (dialog, which) -> {
+                String query = input.getText() == null ? "" : input.getText().toString().trim().toLowerCase(Locale.ROOT);
+                if (query.isEmpty()) {
+                    Toast.makeText(activity, R.string.workspace_recursive_search_empty, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                ProgressDialog progress = new ProgressDialog(activity);
+                progress.setTitle(R.string.workspace_recursive_search_title);
+                progress.setMessage(activity.getString(R.string.workspace_recursive_search_progress));
+                progress.setIndeterminate(true);
+                progress.setCancelable(true);
+                AtomicBoolean cancelled = new AtomicBoolean(false);
+                progress.setOnCancelListener(d -> cancelled.set(true));
+                progress.show();
+
+                mExecutor.execute(() -> {
+                    List<File> matches = new ArrayList<>();
+                    collectRecursiveMatches(root, query, matches, cancelled, 0, 500);
+                    mMainHandler.post(() -> {
+                        if (activity.isFinishing()) return;
+                        if (progress.isShowing()) progress.dismiss();
+                        if (cancelled.get()) return;
+                        if (matches.isEmpty()) {
+                            new AlertDialog.Builder(activity)
+                                .setMessage(R.string.workspace_recursive_search_no_results)
+                                .setPositiveButton(R.string.editor_cancel, null)
+                                .show();
+                            return;
+                        }
+                        List<String> labels = new ArrayList<>();
+                        for (File match : matches) labels.add(match.getAbsolutePath());
+                        ArrayAdapter<String> resultsAdapter = new ArrayAdapter<>(
+                            activity, android.R.layout.simple_list_item_1, labels);
+                        new AlertDialog.Builder(activity)
+                            .setTitle(activity.getString(R.string.workspace_recursive_search_results, matches.size()))
+                            .setAdapter(resultsAdapter, (resultDialog, index) -> callback.onSelected(matches.get(index)))
+                            .setNegativeButton(R.string.editor_cancel, null)
+                            .show();
+                    });
+                });
+            })
+            .setNegativeButton(R.string.editor_cancel, null)
+            .show();
+    }
+
+    private void collectRecursiveMatches(@NonNull File directory, @NonNull String query,
+                                         @NonNull List<File> matches, @NonNull AtomicBoolean cancelled,
+                                         int depth, int maxResults) {
+        if (cancelled.get() || depth > 64 || matches.size() >= maxResults ||
+            !directory.isDirectory() || java.nio.file.Files.isSymbolicLink(directory.toPath())) return;
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (cancelled.get() || matches.size() >= maxResults) return;
+            if (!mShowHiddenEntries && child.isHidden()) continue;
+            if (child.getName().toLowerCase(Locale.ROOT).contains(query)) matches.add(child);
+            if (child.isDirectory() && !java.nio.file.Files.isSymbolicLink(child.toPath())) {
+                collectRecursiveMatches(child, query, matches, cancelled, depth + 1, maxResults);
+            }
+        }
+    }
+
+    private static boolean isPreviewableMedia(@NonNull File file) {
+        String mime = getMimeType(file);
+        return mime != null && (mime.startsWith("image/") || mime.startsWith("video/"));
+    }
+
+    private static String getMimeType(@NonNull File file) {
+        String extension = getExtension(file.getName()).toLowerCase(Locale.ROOT);
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+    }
+
+    private static void openMediaPreview(@NonNull Activity activity, @NonNull File file) {
+        try {
+            android.net.Uri uri = FileProvider.getUriForFile(
+                activity, activity.getPackageName() + ".workspace.fileprovider", file);
+            String mime = getMimeType(file);
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            viewIntent.setDataAndType(uri, mime != null ? mime : "*/*");
+            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            activity.startActivity(Intent.createChooser(viewIntent,
+                activity.getString(R.string.workspace_item_preview)));
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(activity, R.string.workspace_preview_no_app, Toast.LENGTH_SHORT).show();
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(activity, R.string.workspace_preview_path_unsupported, Toast.LENGTH_LONG).show();
+        }
     }
 
     private static boolean deleteRecursively(@NonNull File file) {
@@ -812,7 +1018,8 @@ public final class WorkspaceMenuBottomSheet {
 
                 File[] children = file.listFiles();
                 int count = children == null ? 0 : children.length;
-                holder.meta.setText(count + " mục • " + mDateFormat.format(new Date(file.lastModified())));
+                holder.meta.setText((mFavoritePaths.contains(file.getAbsolutePath()) ? "★ " : "") +
+                    count + " mục • " + mDateFormat.format(new Date(file.lastModified())));
             } else {
                 String ext = getExtension(file.getName());
                 if (!ext.isEmpty() && ext.length() <= 4) {
@@ -834,7 +1041,8 @@ public final class WorkspaceMenuBottomSheet {
                     if (mListener != null) mListener.onCheckboxToggle(file);
                 });
 
-                holder.meta.setText(formatFileSize(file.length()) + " • " + mDateFormat.format(new Date(file.lastModified())));
+                holder.meta.setText((mFavoritePaths.contains(file.getAbsolutePath()) ? "★ " : "") +
+                    formatFileSize(file.length()) + " • " + mDateFormat.format(new Date(file.lastModified())));
             }
 
             holder.itemView.setOnClickListener(v -> {

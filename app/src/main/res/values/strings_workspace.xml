@@ -96,5 +96,24 @@
     <string name="workspace_batch_delete_confirm">Xóa vĩnh viễn</string>
     <string name="workspace_batch_delete_button">Xóa đã chọn</string>
     <string name="workspace_batch_delete_result">Đã xóa %1$d mục • lỗi %2$d</string>
+    <string name="workspace_favorites_title">Yêu thích</string>
+    <string name="workspace_favorites_button_initial">★ Yêu thích</string>
+    <string name="workspace_favorites_button">★ Yêu thích (%1$d)</string>
+    <string name="workspace_favorites_back">Mở thư mục hiện tại</string>
+    <string name="workspace_favorite_add">Thêm vào yêu thích</string>
+    <string name="workspace_favorite_remove">Bỏ khỏi yêu thích</string>
+    <string name="workspace_favorite_added">Đã thêm vào danh sách yêu thích</string>
+    <string name="workspace_favorite_removed">Đã bỏ khỏi danh sách yêu thích</string>
+    <string name="workspace_recursive_search_title">Tìm kiếm sâu</string>
+    <string name="workspace_recursive_search_root">Phạm vi: %1$s</string>
+    <string name="workspace_recursive_search_hint">Nhập tên tệp hoặc thư mục…</string>
+    <string name="workspace_recursive_search_action">Tìm</string>
+    <string name="workspace_recursive_search_empty">Hãy nhập từ khóa tìm kiếm</string>
+    <string name="workspace_recursive_search_progress">Đang quét các thư mục con…</string>
+    <string name="workspace_recursive_search_no_results">Không tìm thấy mục phù hợp</string>
+    <string name="workspace_recursive_search_results">Kết quả tìm kiếm (%1$d)</string>
+    <string name="workspace_item_preview">Xem ảnh / video</string>
+    <string name="workspace_preview_no_app">Không tìm thấy ứng dụng xem tệp phù hợp</string>
+    <string name="workspace_preview_path_unsupported">Đường dẫn này không nằm trong vùng được phép chia sẻ</string>
 
 </resources>
