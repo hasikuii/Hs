@@ -88,5 +88,13 @@
     <string name="workspace_item_compress">Nén (ZIP / TAR.GZ / TAR)…</string>
     <string name="workspace_item_copy_path">Sao chép đường dẫn</string>
     <string name="workspace_item_details">Chi tiết &amp; dung lượng</string>
+    <string name="workspace_menu_action_extract">%1$d kho nén • Giải nén</string>
+    <string name="workspace_menu_action_extract_none">Giải nén đã chọn</string>
+    <string name="workspace_batch_extract_message">Mỗi tệp nén sẽ được giải nén vào một thư mục riêng để tránh ghi đè các tệp trùng tên.</string>
+    <string name="workspace_batch_delete_title">Xóa %1$d mục đã chọn?</string>
+    <string name="workspace_batch_delete_message">Các tệp và thư mục con sẽ bị xóa vĩnh viễn. Không thể hoàn tác thao tác này.</string>
+    <string name="workspace_batch_delete_confirm">Xóa vĩnh viễn</string>
+    <string name="workspace_batch_delete_button">Xóa đã chọn</string>
+    <string name="workspace_batch_delete_result">Đã xóa %1$d mục • lỗi %2$d</string>
 
 </resources>

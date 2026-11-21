@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -212,6 +213,51 @@ public final class WorkspaceArchiveDialogs {
                 MAIN.post(() -> Toast.makeText(context,
                     "Lỗi giải nén: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
+        });
+    }
+
+    /**
+     * Extract multiple selected archives into separate, collision-safe subfolders.
+     * This avoids overwriting files when different archives contain the same paths.
+     */
+    public static void runExtractBatch(@NonNull Context context,
+                                       @NonNull List<File> archives,
+                                       @NonNull File parentDir,
+                                       @NonNull Runnable onCompleted) {
+        List<File> validArchives = new ArrayList<>();
+        for (File archive : archives) {
+            if (archive != null && archive.isFile() && WorkspaceArchiveHelper.isArchiveFile(archive)) {
+                validArchives.add(archive);
+            }
+        }
+        if (validArchives.isEmpty()) return;
+
+        Toast.makeText(context, "Đang giải nén " + validArchives.size() + " kho lưu trữ…",
+            Toast.LENGTH_SHORT).show();
+        EXECUTOR.execute(() -> {
+            int succeeded = 0;
+            int failed = 0;
+            String firstError = null;
+            for (File archive : validArchives) {
+                String folderName = WorkspaceArchiveHelper.stripArchiveExtension(archive.getName());
+                File targetDir = WorkspaceArchiveHelper.resolveUniqueTarget(parentDir, folderName, true);
+                try {
+                    WorkspaceArchiveHelper.extract(archive, targetDir);
+                    succeeded++;
+                } catch (IOException e) {
+                    failed++;
+                    if (firstError == null) firstError = archive.getName() + ": " + e.getMessage();
+                }
+            }
+            final int successCount = succeeded;
+            final int failedCount = failed;
+            final String error = firstError;
+            MAIN.post(() -> {
+                String message = "Đã giải nén " + successCount + "/" + validArchives.size() + " tệp nén";
+                if (failedCount > 0) message += " • lỗi " + failedCount + (error != null ? "\n" + error : "");
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show();
+                onCompleted.run();
+            });
         });
     }
 

@@ -46,7 +46,7 @@ import java.util.concurrent.Executors;
 /**
  * Extra-key Workspace Menu displaying the files and folders in the current directory,
  * supporting remembered folder persistence, ZArchiver/RAR file & archive operations,
- * Pydroid-style multi-file batch editing, pasted tree diagrams, and Google Drive backup/sync.
+ * Pydroid-style multi-file batch editing, pasted tree diagrams, and batch archive operations.
  */
 public final class WorkspaceMenuBottomSheet {
 
@@ -129,6 +129,8 @@ public final class WorkspaceMenuBottomSheet {
         MaterialButton copyBatchBtn = root.findViewById(R.id.btn_copy_selected_batch);
         MaterialButton moveBatchBtn = root.findViewById(R.id.btn_move_selected_batch);
         MaterialButton compressBatchBtn = root.findViewById(R.id.btn_compress_selected_batch);
+        MaterialButton extractBatchBtn = root.findViewById(R.id.btn_extract_selected_batch);
+        MaterialButton deleteBatchBtn = root.findViewById(R.id.btn_delete_selected_batch);
         MaterialButton openBatchBtn = root.findViewById(R.id.btn_open_selected_batch);
 
         FileAdapter adapter = new FileAdapter();
@@ -152,10 +154,12 @@ public final class WorkspaceMenuBottomSheet {
         Runnable updateBatchBar = () -> {
             int totalCount = mSelectedFilePaths.size();
             int editableFileCount = 0;
+            int archiveCount = 0;
             for (String path : mSelectedFilePaths) {
                 File f = new File(path);
                 if (f.exists() && f.isFile()) {
                     editableFileCount++;
+                    if (WorkspaceArchiveHelper.isArchiveFile(f)) archiveCount++;
                 }
             }
             if (totalCount > 0 || mBatchSelectMode) {
@@ -164,6 +168,11 @@ public final class WorkspaceMenuBottomSheet {
                 copyBatchBtn.setEnabled(hasSelection);
                 moveBatchBtn.setEnabled(hasSelection);
                 compressBatchBtn.setEnabled(hasSelection);
+                extractBatchBtn.setEnabled(archiveCount > 0);
+                deleteBatchBtn.setEnabled(hasSelection);
+                extractBatchBtn.setText(archiveCount > 0
+                    ? activity.getString(R.string.workspace_menu_action_extract, archiveCount)
+                    : activity.getString(R.string.workspace_menu_action_extract_none));
                 if (hasSelection) {
                     copyBatchBtn.setText(activity.getString(R.string.workspace_menu_action_copy, totalCount));
                     moveBatchBtn.setText(activity.getString(R.string.workspace_menu_action_move, totalCount));
@@ -394,6 +403,54 @@ public final class WorkspaceMenuBottomSheet {
                     reloadDirectory.run();
                 });
             }
+        });
+
+        extractBatchBtn.setOnClickListener(v -> {
+            List<File> archives = new ArrayList<>();
+            for (File selected : collectSelectedEntries()) {
+                if (WorkspaceArchiveHelper.isArchiveFile(selected)) archives.add(selected);
+            }
+            if (archives.isEmpty()) return;
+            new AlertDialog.Builder(activity)
+                .setTitle(activity.getString(R.string.workspace_menu_action_extract, archives.size()))
+                .setMessage(R.string.workspace_batch_extract_message)
+                .setPositiveButton(R.string.workspace_archive_extract_here, (d, w) ->
+                    WorkspaceArchiveDialogs.runExtractBatch(activity, archives, mCurrentDir, () -> {
+                        mSelectedFilePaths.clear();
+                        mBatchSelectMode = false;
+                        reloadDirectory.run();
+                    }))
+                .setNegativeButton(R.string.editor_cancel, null)
+                .show();
+        });
+
+        deleteBatchBtn.setOnClickListener(v -> {
+            List<File> selected = collectSelectedEntries();
+            if (selected.isEmpty()) return;
+            new AlertDialog.Builder(activity)
+                .setTitle(activity.getString(R.string.workspace_batch_delete_title, selected.size()))
+                .setMessage(R.string.workspace_batch_delete_message)
+                .setPositiveButton(R.string.workspace_batch_delete_confirm, (d, w) ->
+                    mExecutor.execute(() -> {
+                        int deleted = 0;
+                        int failed = 0;
+                        for (File target : selected) {
+                            if (deleteRecursively(target)) deleted++;
+                            else failed++;
+                        }
+                        final int deletedCount = deleted;
+                        final int failedCount = failed;
+                        mMainHandler.post(() -> {
+                            mSelectedFilePaths.clear();
+                            mBatchSelectMode = false;
+                            Toast.makeText(activity,
+                                activity.getString(R.string.workspace_batch_delete_result, deletedCount, failedCount),
+                                Toast.LENGTH_LONG).show();
+                            reloadDirectory.run();
+                        });
+                    }))
+                .setNegativeButton(R.string.editor_cancel, null)
+                .show();
         });
 
         openBatchBtn.setOnClickListener(v -> {
@@ -675,15 +732,20 @@ public final class WorkspaceMenuBottomSheet {
         return result;
     }
 
-    private static void deleteRecursively(@NonNull File file) {
+    private static boolean deleteRecursively(@NonNull File file) {
+        // Delete a symbolic link itself; never traverse its target.
+        if (java.nio.file.Files.isSymbolicLink(file.toPath())) {
+            return file.delete();
+        }
+        boolean success = true;
         if (file.isDirectory()) {
             File[] children = file.listFiles();
-            if (children != null) {
-                for (File c : children) deleteRecursively(c);
+            if (children == null) return false;
+            for (File child : children) {
+                if (!deleteRecursively(child)) success = false;
             }
         }
-        //noinspection ResultOfMethodCallIgnored
-        file.delete();
+        return file.delete() && success;
     }
 
     private interface NameCallback {
@@ -765,7 +827,7 @@ public final class WorkspaceMenuBottomSheet {
                     holder.extBadge.setVisibility(View.GONE);
                 }
 
-                holder.checkbox.setVisibility(View.VISIBLE);
+                holder.checkbox.setVisibility(mBatchSelectMode ? View.VISIBLE : View.GONE);
                 holder.checkbox.setOnCheckedChangeListener(null);
                 holder.checkbox.setChecked(mSelectedFilePaths.contains(file.getAbsolutePath()));
                 holder.checkbox.setOnCheckedChangeListener((btn, checked) -> {
@@ -781,9 +843,8 @@ public final class WorkspaceMenuBottomSheet {
 
             holder.itemView.setOnLongClickListener(v -> {
                 mBatchSelectMode = true;
-                toggleSelection(file);
-                notifyDataSetChanged();
                 if (mListener != null) mListener.onCheckboxToggle(file);
+                notifyDataSetChanged();
                 return true;
             });
 
