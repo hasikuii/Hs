@@ -145,6 +145,15 @@ android {
 }
 
 dependencies {
+    // Guava already contains ListenableFuture. Some Android transitive dependencies
+    // also request the standalone listenablefuture:1.0 artifact, which duplicates
+    // the same class during APK packaging. Prefer the Guava implementation.
+    modules {
+        module("com.google.guava:listenablefuture") {
+            replacedBy("com.google.guava:guava", "ListenableFuture is included in Guava")
+        }
+    }
+
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.robolectric:robolectric:4.10"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:1.1.5"
