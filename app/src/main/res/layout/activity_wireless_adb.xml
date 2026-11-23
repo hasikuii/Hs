@@ -30,7 +30,7 @@
             android:paddingBottom="8dp" />
 
         <LinearLayout
-            android:id="+id/adb_sdk_warning"
+            android:id="@+id/adb_sdk_warning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
@@ -46,7 +46,7 @@
         </LinearLayout>
 
         <TextView
-            android:id="+id/adb_fingerprint"
+            android:id="@+id/adb_fingerprint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Khóa ADB: đang sinh…"
@@ -55,7 +55,7 @@
             android:paddingBottom="6dp" />
 
         <TextView
-            android:id="+id/adb_status"
+            android:id="@+id/adb_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Chưa kết nối."
@@ -85,14 +85,14 @@
             android:orientation="horizontal"
             android:paddingBottom="6dp">
             <EditText
-                android:id="+id/adb_pair_port"
+                android:id="@+id/adb_pair_port"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:hint="Cổng ghép nối"
                 android:inputType="number" />
             <EditText
-                android:id="+id/adb_pair_code"
+                android:id="@+id/adb_pair_code"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1.4"
@@ -101,7 +101,7 @@
         </LinearLayout>
 
         <Button
-            android:id="+id/adb_pair_btn"
+            android:id="@+id/adb_pair_btn"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Ghép nối" />
@@ -128,19 +128,19 @@
             android:orientation="horizontal"
             android:paddingBottom="6dp">
             <EditText
-                android:id="+id/adb_connect_port"
+                android:id="@+id/adb_connect_port"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:hint="Cổng kết nối"
                 android:inputType="number" />
             <Button
-                android:id="+id/adb_connect_btn"
+                android:id="@+id/adb_connect_btn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Kết nối" />
             <Button
-                android:id="+id/adb_disconnect_btn"
+                android:id="@+id/adb_disconnect_btn"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Ngắt"
@@ -162,30 +162,27 @@
             android:orientation="horizontal"
             android:paddingBottom="4dp">
             <Button
-                android:id="+id/adb_quick_id"
+                android:id="@+id/adb_quick_id"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="id -u"
-                android:textSize="11sp"
-                style="@style/Widget.MaterialComponents.Button.TextButton" />
+                android:textSize="11sp" />
             <Button
-                android:id="+id/adb_quick_packages"
+                android:id="@+id/adb_quick_packages"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="pm list -3"
-                android:textSize="11sp"
-                style="@style/Widget.MaterialComponents.Button.TextButton" />
+                android:textSize="11sp" />
             <Button
-                android:id="+id/adb_quick_logcat"
+                android:id="@+id/adb_quick_logcat"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="logcat"
-                android:textSize="11sp"
-                style="@style/Widget.MaterialComponents.Button.TextButton" />
+                android:textSize="11sp" />
         </LinearLayout>
 
         <EditText
-            android:id="+id/adb_command"
+            android:id="@+id/adb_command"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Lệnh shell, vd: dumpsys activity top | head -50"
@@ -195,14 +192,14 @@
             android:imeOptions="actionDone" />
 
         <Button
-            android:id="+id/adb_run_btn"
+            android:id="@+id/adb_run_btn"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Chạy"
             android:enabled="false" />
 
         <TextView
-            android:id="+id/adb_output"
+            android:id="@+id/adb_output"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:minHeight="180dp"
