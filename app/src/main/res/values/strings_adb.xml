@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later OR Apache-2.0
+  Strings for the wireless ADB feature (kept separate so the large main strings.xml
+  doesn't have to be edited).
+-->
+<resources>
+    <string name="wireless_adb_shortcut_label">ADB không dây</string>
+    <string name="wireless_adb_shortcut_long">Gỡ lỗi ADB không dây (kiểu Shizuku)</string>
+    <string name="wireless_adb_title">ADB không dây</string>
+</resources>
