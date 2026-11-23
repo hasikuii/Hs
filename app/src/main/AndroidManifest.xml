@@ -103,6 +103,14 @@
             android:theme="@style/Theme.TermuxApp.DayNight.NoActionBar" />
 
         <activity
+            android:name=".app.adb.WirelessAdbActivity"
+            android:exported="false"
+            android:label="ADB không dây"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:parentActivityName=".app.TermuxActivity"
+            tools:targetApi="n" />
+
+        <activity
             android:name=".app.workspace.WorkspaceEditorActivity"
             android:exported="false"
             android:label="@string/editor_title"
