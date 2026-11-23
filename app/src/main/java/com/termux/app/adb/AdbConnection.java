@@ -57,6 +57,11 @@ public final class AdbConnection implements java.io.Closeable {
         return new AdbConnection(host, port, new KeyPair(privateKey, certificate));
     }
 
+    /** Variant that accepts an Android API level for future protocol-version selection (currently unused). */
+    public static AdbConnection create(String host, int port, PrivateKey privateKey, Certificate certificate, int api) throws IOException {
+        return new AdbConnection(host, port, new KeyPair(privateKey, certificate));
+    }
+
     public void setDeviceName(String name) {
         mDeviceName = name;
     }
