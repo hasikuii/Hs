@@ -45,7 +45,7 @@ final class AdbCertificates {
         BigInteger serial = new BigInteger(1, serialBytes);
 
         byte[] tbs = DerWriter.seq(
-                DerWriter.explicit(0, DerWriter.seq(DerWriter.integer(BigInteger.valueOf(2)))),
+                DerWriter.explicit(0, DerWriter.integer(BigInteger.valueOf(2))),
                 DerWriter.integer(serial),
                 algId,
                 name,
