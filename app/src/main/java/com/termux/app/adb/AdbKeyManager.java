@@ -54,7 +54,16 @@ public final class AdbKeyManager {
         File privFile = new File(mDir, "adbkey");
         File certFile = new File(mDir, "adbkey.crt.der");
         if (privFile.exists() && certFile.exists() && privFile.length() > 0 && certFile.length() > 0) {
-            mKeyPair = loadKeyPair(privFile, certFile);
+            try {
+                mKeyPair = loadKeyPair(privFile, certFile);
+            } catch (Exception e) {
+                // Stored cert/key is corrupted or from a buggy older build (e.g. the
+                // malformed X.509 version field fixed in AdbCertificates) — discard and
+                // regenerate so the app self-heals instead of permanently failing.
+                privFile.delete();
+                certFile.delete();
+                mKeyPair = generateKeyPair(privFile, certFile);
+            }
         } else {
             mKeyPair = generateKeyPair(privFile, certFile);
         }
