@@ -64,7 +64,7 @@ final class SslUtils {
         @Override
         public String chooseClientAlias(String[] keyTypes, Principal[] issuers, Socket socket) {
             for (String kt : keyTypes) {
-                if (RSA".equals(kt)) {
+                if ("RSA".equals(kt)) {
                     return ALIAS;
                 }
             }
