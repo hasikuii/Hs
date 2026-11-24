@@ -200,35 +200,78 @@ public class WirelessAdbActivity extends AppCompatActivity {
     }
 
     /**
-     * SPAKE2 pairing (6-digit code) is not yet wired into the APK build.
-     * The crypto core has been verified in offline tests and will ship in
-     * the next update. Until then, show a helpful dialog explaining how to
-     * authorize the ADB key via alternative methods.
+     * Run the SPAKE2 pairing handshake against {@code host:pairPort} with the
+     * 6-digit code the user entered. The actual protocol is implemented in
+     * {@link PairingClient} (TLS 1.3 + SPAKE2 + AES-128-GCM + peer-info
+     * exchange, mirroring AOSP {@code pairing_client.cpp}). On success the
+     * server has written our RSA pubkey to {@code /data/misc/adb/adb_keys}
+     * and a subsequent Connect will succeed.
+     *
+     * <p>The handshake runs on the background executor; the UI shows a
+     * non-cancelable progress dialog and re-enables the button when done.
      */
     private void doPair() {
-        final String fp;
-        try {
-            fp = mKeyManager.getFingerprint();
-        } catch (Exception e) {
-            Toast.makeText(this, "Không đọc được khóa: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        final String portStr = mPairPort.getText() == null ? "" : mPairPort.getText().toString().trim();
+        final String code = mPairCode.getText() == null ? "" : mPairCode.getText().toString().trim();
+        if (portStr.isEmpty()) {
+            Toast.makeText(this, "Nhập cổng ghép nối", Toast.LENGTH_SHORT).show();
             return;
         }
-        new AlertDialog.Builder(this)
-            .setTitle("Ghép nối không dây (SPAKE2)")
-            .setMessage("Ghép nối bằng mã 6 số đang được hoàn thiện — mã nguồn đã xác thực crypto thành công, sẽ có trong bản cập nhật tiếp theo.\n\n"
-                + "Để kết nối ADB ngay, cần ủy quyền khóa công khai của app với adbd:\n\n"
-                + "Cách 1 — Từ máy tính (không cần root):\n"
-                + "  1. Cắm cáp USB\n"
-                + "  2. Chạy: adb tcpip 5555\n"
-                + "  3. Rút cáp, nhập cổng 5555 rồi bấm KẾT NỐI\n\n"
-                + "Cách 2 — Root:\n"
-                + "  Đẩy khóa vào: /data/misc/adb/adb_keys\n"
-                + "  Sau đó nhập cổng mặc định (5555) rồi KẾT NỐI\n\n"
-                + "Cách 3 — App đã ủy quyền:\n"
-                + "  Dùng Shizuku/LADB nếu đã ghép nối trước đó\n\n"
-                + "Khóa công khai (SHA-256):\n" + fp)
-            .setPositiveButton("Đã hiểu", null)
+        final int port;
+        try {
+            port = Integer.parseInt(portStr);
+        } catch (NumberFormatException e) {
+            Toast.makeText(this, "Cổng không hợp lệ", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final AlertDialog progress = new AlertDialog.Builder(this)
+            .setTitle("Đang ghép nối")
+            .setMessage("Kết nối TLS + SPAKE2 tới " + HOST + ":" + port + "…\n"
+                + "Nếu mã đúng, khóa công khai của app sẽ được thêm vào adb_keys.")
+            .setCancelable(false)
             .show();
+
+        mPairBtn.setEnabled(false);
+        mExecutor.execute(() -> {
+            String okMsg = null;
+            String errMsg = null;
+            try {
+                KeyPair kp = mKeyManager.getKeyPair();
+                PairingClient client = new PairingClient(HOST, kp, "termux-adb");
+                client.pair(port, code, 15);
+                okMsg = "Đã ghép nối thành công. Khóa công khai đã được ủy quyền.\n"
+                    + "Giờ nhập cổng kết nối (màn Wireless debugging chính) rồi bấm KẾT NỐI.";
+            } catch (Throwable t) {
+                errMsg = "Ghép nối thất bại: " + t.getMessage();
+            }
+            final String finalOk = okMsg;
+            final String finalErr = errMsg;
+            mMain.post(() -> {
+                if (progress.isShowing()) {
+                    try { progress.dismiss(); } catch (Exception ignored) {}
+                }
+                updatePairButtonState();
+                if (finalOk != null) {
+                    new AlertDialog.Builder(WirelessAdbActivity.this)
+                        .setTitle("Ghép nối xong")
+                        .setMessage(finalOk)
+                        .setPositiveButton("Đã hiểu", null)
+                        .show();
+                } else {
+                    new AlertDialog.Builder(WirelessAdbActivity.this)
+                        .setTitle("Ghép nối thất bại")
+                        .setMessage(finalErr + "\n\n"
+                            + "Nguyên nhân thường gặp:\n"
+                            + "• Mã hoặc cổng sai (cổng ghép nối ≠ cổng kết nối)\n"
+                            + "• Mã hết hạn (mỗi mã chỉ dùng 1 lần trong ~30s)\n"
+                            + "• Wi-Fi khác mạng với máy cần ghép\n"
+                            + "• Android < 11 không hỗ trợ")
+                        .setPositiveButton("Thử lại", null)
+                        .show();
+                }
+            });
+        });
     }
 
     private void doConnect() {
