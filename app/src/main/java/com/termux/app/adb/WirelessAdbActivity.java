@@ -22,7 +22,10 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.termux.R;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -260,6 +263,9 @@ public class WirelessAdbActivity extends AppCompatActivity {
                     mRunBtn.setEnabled(true);
                     Toast.makeText(WirelessAdbActivity.this, "Đã kết nối ADB", Toast.LENGTH_SHORT).show();
                 });
+                // Auto-install CLI wrappers so pm/cmd/am/dumpsys/settings/input/svc
+                // in the Termux terminal route through the ADB shell (UID 2000).
+                installCliWrappers();
             } catch (final Exception e) {
                 setStatus("Kết nối thất bại: " + e.getMessage());
                 mMain.post(() -> mConnectBtn.setEnabled(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R));
@@ -326,6 +332,134 @@ public class WirelessAdbActivity extends AppCompatActivity {
                 mMain.post(() -> mRunBtn.setEnabled(true));
             }
         });
+    }
+
+    /**
+     * Installs wrapper scripts for pm, cmd, am, dumpsys, settings, input, svc
+     * into $PREFIX/bin/ so that these commands in the Termux terminal
+     * automatically route through the ADB shell connection (UID 2000)
+     * instead of running as the app UID (which gets "Failed transaction"
+     * errors from PackageManagerService).
+     *
+     * <p>Each wrapper:
+     * <ol>
+     *   <li>Sends the command via am broadcast to AdbCommandReceiver</li>
+     *   <li>Polls for the output file (up to 5s)</li>
+     *   <li>If ADB responds, cats the output</li>
+     *   <li>If ADB doesn't respond, falls back to /system/bin/&lt;cmd&gt;</li>
+     * </ol>
+     *
+     * <p>Existing scripts are backed up to &lt;cmd&gt;.orig before overwriting.
+     */
+    private void installCliWrappers() {
+        final String pkg = getPackageName();
+        final File filesDir = getFilesDir();
+        final File binDir = new File(filesDir, "usr/bin");
+        final String[] cmds = {"pm", "cmd", "am", "dumpsys", "settings", "input", "svc"};
+
+        mExecutor.execute(() -> {
+            int installed = 0;
+            int backed = 0;
+            String error = null;
+            try {
+                if (!binDir.exists() && !binDir.mkdirs()) {
+                    throw new IOException("Không tạo được " + binDir.getAbsolutePath());
+                }
+                for (String cmd : cmds) {
+                    File wrapper = new File(binDir, cmd);
+                    File orig = new File(binDir, cmd + ".orig");
+                    if (wrapper.exists()) {
+                        String firstLine = readFirstLine(wrapper);
+                        if (firstLine != null && firstLine.contains("ADB-routed")) {
+                            // Already our wrapper — overwrite directly
+                        } else {
+                            if (!orig.exists()) {
+                                copyFile(wrapper, orig);
+                                backed++;
+                            }
+                        }
+                    }
+                    String fallback = cmd.equals("pm")
+                        ? "/system/bin/cmd package"
+                        : "/system/bin/" + cmd;
+                    String content = buildWrapperContent(cmd, fallback, pkg);
+                    try (OutputStream out = new FileOutputStream(wrapper)) {
+                        out.write(content.getBytes(StandardCharsets.UTF_8));
+                    }
+                    wrapper.setExecutable(true);
+                    installed++;
+                }
+            } catch (Exception e) {
+                error = e.getMessage();
+            }
+            final int finalInstalled = installed;
+            final int finalBacked = backed;
+            final String finalError = error;
+            mMain.post(() -> {
+                if (finalError != null) {
+                    Toast.makeText(this, "Lỗi cài CLI: " + finalError, Toast.LENGTH_LONG).show();
+                } else {
+                    String msg = "Đã cài " + finalInstalled + " CLI wrappers vào $PREFIX/bin/\n"
+                        + "pm, cmd, am, dumpsys, settings, input, svc\n"
+                        + "→ giờ chạy trực tiếp trong terminal sẽ đi qua ADB (UID 2000)";
+                    if (finalBacked > 0) {
+                        msg += "\n(đã backup " + finalBacked + " file gốc → *.orig)";
+                    }
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+    }
+
+    /** Builds the wrapper script content for a given command. */
+    private static String buildWrapperContent(String cmd, String fallback, String pkg) {
+        String receiver = pkg + "/.app.adb.AdbService$AdbCommandReceiver";
+        return "#!/data/data/" + pkg + "/files/usr/bin/sh\n"
+            + "# " + cmd + " — ADB-routed wrapper (UID 2000 when AdbService is running)\n"
+            + "# Falls back to " + fallback + " if ADB service is not running.\n"
+            + "\n"
+            + "OUTFILE=\"/tmp/adb_out_$$.txt\"\n"
+            + "rm -f \"$OUTFILE\"\n"
+            + "\n"
+            + "am broadcast -a com.termux.adb.RUN_COMMAND -n '" + receiver + "' \\\n"
+            + "    --es command \"shell:" + cmd + " $*\" \\\n"
+            + "    --es outfile \"$OUTFILE\" >/dev/null 2>&1\n"
+            + "\n"
+            + "i=0\n"
+            + "while [ $i -lt 50 ]; do\n"
+            + "    [ -f \"$OUTFILE\" ] && break\n"
+            + "    i=$((i + 1))\n"
+            + "    sleep 0.1\n"
+            + "done\n"
+            + "\n"
+            + "if [ -f \"$OUTFILE\" ]; then\n"
+            + "    cat \"$OUTFILE\"\n"
+            + "    rm -f \"$OUTFILE\"\n"
+            + "    exit 0\n"
+            + "fi\n"
+            + "\n"
+            + "rm -f \"$OUTFILE\"\n"
+            + "exec " + fallback + " \"$@\"\n";
+    }
+
+    private static String readFirstLine(File file) {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(file), StandardCharsets.UTF_8))) {
+            return reader.readLine();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void copyFile(File src, File dst) throws IOException {
+        try (java.io.InputStream in = new java.io.FileInputStream(src);
+             java.io.OutputStream out = new java.io.FileOutputStream(dst)) {
+            byte[] buf = new byte[4096];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+        }
     }
 
     @Override
