@@ -65,6 +65,9 @@ public class WirelessAdbActivity extends AppCompatActivity {
     private TextView mOutput;
     private LinearLayout mSdkWarning;
 
+    /** Cached result of {@code Build.VERSION.SDK_INT >= R}. */
+    private boolean mAdbSupported;
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -87,24 +90,40 @@ public class WirelessAdbActivity extends AppCompatActivity {
 
         mKeyManager = new AdbKeyManager(this, "termux-adb");
 
-        final boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
-        mSdkWarning.setVisibility(supported ? View.GONE : View.VISIBLE);
-        mConnectBtn.setEnabled(supported);
-        // Pair button starts disabled; TextWatcher enables it when port + 6-digit code are filled.
+        mAdbSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+        mSdkWarning.setVisibility(mAdbSupported ? View.GONE : View.VISIBLE);
+        mConnectBtn.setEnabled(mAdbSupported);
+        // Pair button starts disabled; updatePairButtonState() enables it once
+        // both port + 6-digit code are entered.
         mPairBtn.setEnabled(false);
 
+        // Re-validate on every keystroke.
         TextWatcher pairWatcher = new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
-                String port = mPairPort.getText().toString().trim();
-                String code = mPairCode.getText().toString().trim();
-                mPairBtn.setEnabled(supported && !port.isEmpty() && code.length() == 6);
+                updatePairButtonState();
             }
         };
         mPairPort.addTextChangedListener(pairWatcher);
         mPairCode.addTextChangedListener(pairWatcher);
+
+        // Re-validate when an EditText loses focus. This catches a class of
+        // edge cases that afterTextChanged misses:
+        //  - Activity recreated after process death (savedInstanceState restores
+        //    text into the EditTexts BEFORE the TextWatcher is attached).
+        //  - IME auto-fill / voice input that bypasses the Editable pipeline.
+        //  - Paste from clipboard that arrives as a single batch event.
+        View.OnFocusChangeListener focusValidator = (v, hasFocus) -> {
+            if (!hasFocus) updatePairButtonState();
+        };
+        mPairPort.setOnFocusChangeListener(focusValidator);
+        mPairCode.setOnFocusChangeListener(focusValidator);
+
+        // Initial validation: handles restored instance state that bypassed the
+        // TextWatcher, and is also a no-op when fields are empty.
+        updatePairButtonState();
 
         // Load / generate the adb keypair in background and display fingerprint.
         mExecutor.execute(() -> {
@@ -124,6 +143,47 @@ public class WirelessAdbActivity extends AppCompatActivity {
         findViewById(R.id.adb_quick_id).setOnClickListener(v -> { mCommandInput.setText("id -u"); runCommand(); });
         findViewById(R.id.adb_quick_packages).setOnClickListener(v -> { mCommandInput.setText("pm list packages -3 | head -20"); runCommand(); });
         findViewById(R.id.adb_quick_logcat).setOnClickListener(v -> { mCommandInput.setText("logcat -d -t 50"); runCommand(); });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Re-validate when returning to the activity (e.g. after the user
+        // switched to Android's wireless-debugging screen to copy the port
+        // and pairing code, then came back here).
+        updatePairButtonState();
+    }
+
+    /**
+     * Recomputes whether the "Ghép nối" button should be enabled.
+     *
+     * <p>The button becomes enabled only when:
+     * <ul>
+     *   <li>Device is Android 11+ ({@code mAdbSupported}), AND</li>
+     *   <li>The port field is non-empty, AND</li>
+     *   <li>The code field contains exactly 6 digits (after stripping any
+     *       non-digit characters — defensive against IME separators, full-width
+     *       digits, and Unicode whitespace that {@code trim()} does not remove).</li>
+     * </ul>
+     *
+     * <p>This method is called from three triggers (TextWatcher, focus change,
+     * onResume) so that no realistic user input path can leave the button stuck
+     * in the wrong state.
+     */
+    private void updatePairButtonState() {
+        try {
+            String port = mPairPort.getText() == null ? ""
+                : mPairPort.getText().toString().trim();
+            String code = mPairCode.getText() == null ? ""
+                : mPairCode.getText().toString().trim();
+            // Strip everything that isn't an ASCII digit — protects against
+            // keyboard-injected separators and invisible Unicode characters
+            // that would otherwise inflate the visible char count.
+            String codeDigits = code.replaceAll("\\D", "");
+            mPairBtn.setEnabled(mAdbSupported && !port.isEmpty() && codeDigits.length() == 6);
+        } catch (Exception ignored) {
+            // Never crash on validation — leave the button in its current state.
+        }
     }
 
     private void setStatus(final String text) {
