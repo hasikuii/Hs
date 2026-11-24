@@ -597,23 +597,38 @@ public final class WorkspaceMenuBottomSheet {
                         mBatchSelectMode = true; break;
                     case 11:
                         showRecursiveSearchDialog(activity, mCurrentDir, result -> {
-                            if (result.isDirectory()) {
-                                mShowingFavorites = false;
-                                mCurrentDir = result;
-                                reloadDirectory.run();
-                            } else if (isPreviewableMedia(result)) {
-                                openMediaPreview(activity, result);
-                            } else if (WorkspaceArchiveHelper.isArchiveFile(result)) {
-                                WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, result,
-                                    result.getParentFile(), reloadDirectory, () -> {
-                                        parentDialog.dismiss();
-                                        hostActions.onOpenFilesInBatchEditor(
-                                            Collections.singletonList(result), result.getParentFile());
-                                    });
-                            } else {
-                                parentDialog.dismiss();
-                                hostActions.onOpenFilesInBatchEditor(
-                                    Collections.singletonList(result), result.getParentFile());
+                            if (activity.isFinishing() || activity.isDestroyed()) return;
+                            try {
+                                if (result.isDirectory()) {
+                                    mShowingFavorites = false;
+                                    mCurrentDir = result;
+                                    mFilterQuery = "";
+                                    reloadDirectory.run();
+                                    Toast.makeText(activity, "Đã chuyển đến: " + result.getName(), Toast.LENGTH_SHORT).show();
+                                } else if (isPreviewableMedia(result)) {
+                                    openMediaPreview(activity, result);
+                                } else if (WorkspaceArchiveHelper.isArchiveFile(result)) {
+                                    File archParent = result.getParentFile() != null ? result.getParentFile() : mCurrentDir;
+                                    WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, result,
+                                        archParent, reloadDirectory, () -> {
+                                            if (parentDialog.isShowing()) parentDialog.dismiss();
+                                            hostActions.onOpenFilesInBatchEditor(
+                                                Collections.singletonList(result), archParent);
+                                        });
+                                } else if (result.length() > WorkspaceSessionStore.MAX_EDITABLE_FILE_BYTES) {
+                                    Toast.makeText(activity, "Tệp quá lớn (" + formatFileSize(result.length()) + ") để mở trong trình sửa.", Toast.LENGTH_LONG).show();
+                                } else {
+                                    File fileParent = result.getParentFile() != null ? result.getParentFile() : mCurrentDir;
+                                    if (parentDialog.isShowing()) parentDialog.dismiss();
+                                    hostActions.onOpenFilesInBatchEditor(
+                                        Collections.singletonList(result), fileParent);
+                                }
+                            } catch (Throwable t) {
+                                // Catch Throwable (not just Exception) to handle OutOfMemoryError,
+                                // StackOverflowError, and other Errors that would otherwise crash the app.
+                                try {
+                                    Toast.makeText(activity, "Không thể mở kết quả: " + t.getMessage(), Toast.LENGTH_LONG).show();
+                                } catch (Throwable ignored) {}
                             }
                         });
                         return;
@@ -983,7 +998,7 @@ public final class WorkspaceMenuBottomSheet {
                     List<File> matches = new ArrayList<>();
                     collectRecursiveMatches(root, query, matches, cancelled, 0, 500);
                     mMainHandler.post(() -> {
-                        if (activity.isFinishing()) return;
+                        if (activity.isFinishing() || activity.isDestroyed()) return;
                         if (progress.isShowing()) progress.dismiss();
                         if (cancelled.get()) return;
                         if (matches.isEmpty()) {
