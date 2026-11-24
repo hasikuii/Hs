@@ -23,7 +23,14 @@ import javax.net.ssl.X509TrustManager;
  * {@code SetCertVerifyCallback -> 1}).
  */
 final class SslUtils {
+    private static boolean sCustomConscrypt = false;
+
     private SslUtils() {
+    }
+
+    /** True if a bundled org.conscrypt provider was used (we always use the platform one). */
+    static boolean isCustomConscrypt() {
+        return sCustomConscrypt;
     }
 
     static SSLContext getSslContext(KeyPair keyPair) throws NoSuchAlgorithmException, KeyManagementException {
@@ -57,7 +64,7 @@ final class SslUtils {
         @Override
         public String chooseClientAlias(String[] keyTypes, Principal[] issuers, Socket socket) {
             for (String kt : keyTypes) {
-                if ("RSA".equals(kt)) {
+                if (RSA".equals(kt)) {
                     return ALIAS;
                 }
             }
