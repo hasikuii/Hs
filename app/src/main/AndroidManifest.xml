@@ -27,8 +27,6 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.READ_LOGS" />
@@ -99,25 +97,20 @@
             android:theme="@style/Theme.TermuxApp.DayNight.NoActionBar" />
 
         <activity
-            android:name=".app.adb.WirelessAdbActivity"
+            android:name=".app.adb.ShizukuShellActivity"
             android:exported="false"
-            android:label="ADB không dây"
+            android:label="Shizuku Shell"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:parentActivityName=".app.TermuxActivity"
             tools:targetApi="n" />
 
-        <service
-            android:name=".app.adb.AdbService"
-            android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
-
-        <receiver
-            android:name=".app.adb.AdbService$AdbCommandReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.termux.adb.RUN_COMMAND" />
-            </intent-filter>
-        </receiver>
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${TERMUX_PACKAGE_NAME}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <activity
             android:name=".app.workspace.WorkspaceEditorActivity"
