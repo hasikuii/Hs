@@ -31,20 +31,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Shizuku-style on-device wireless ADB debugging entry point.
- *
- * <p>Flow:
- * <ol>
- *   <li>Pair once: open Android 11+ Wireless debugging → "Pair device with pairing code",
- *       enter the port + 6-digit code here.</li>
- *   <li>Connect: enter the connection port from the Wireless debugging main screen.</li>
- *   <li>Run shell commands with UID 2000 (shell) — more privileges than a normal app
- *       (dumpsys, pm grant, logcat, etc.).</li>
- * </ol>
- *
- * <p>Requires Android 11+ (API 30) for TLS 1.3 + wireless debugging pairing.
- */
 public class WirelessAdbActivity extends AppCompatActivity {
 
     private static final String HOST = "127.0.0.1";
@@ -263,8 +249,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
                     mRunBtn.setEnabled(true);
                     Toast.makeText(WirelessAdbActivity.this, "Đã kết nối ADB", Toast.LENGTH_SHORT).show();
                 });
-                // Auto-install CLI wrappers so pm/cmd/am/dumpsys/settings/input/svc
-                // in the Termux terminal route through the ADB shell (UID 2000).
                 installCliWrappers();
             } catch (final Exception e) {
                 setStatus("Kết nối thất bại: " + e.getMessage());
@@ -334,23 +318,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
         });
     }
 
-    /**
-     * Installs wrapper scripts for pm, cmd, am, dumpsys, settings, input, svc
-     * into $PREFIX/bin/ so that these commands in the Termux terminal
-     * automatically route through the ADB shell connection (UID 2000)
-     * instead of running as the app UID (which gets "Failed transaction"
-     * errors from PackageManagerService).
-     *
-     * <p>Each wrapper:
-     * <ol>
-     *   <li>Sends the command via am broadcast to AdbCommandReceiver</li>
-     *   <li>Polls for the output file (up to 5s)</li>
-     *   <li>If ADB responds, cats the output</li>
-     *   <li>If ADB doesn't respond, falls back to /system/bin/&lt;cmd&gt;</li>
-     * </ol>
-     *
-     * <p>Existing scripts are backed up to &lt;cmd&gt;.orig before overwriting.
-     */
     private void installCliWrappers() {
         final String pkg = getPackageName();
         final File filesDir = getFilesDir();
@@ -371,7 +338,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
                     if (wrapper.exists()) {
                         String firstLine = readFirstLine(wrapper);
                         if (firstLine != null && firstLine.contains("ADB-routed")) {
-                            // Already our wrapper — overwrite directly
                         } else {
                             if (!orig.exists()) {
                                 copyFile(wrapper, orig);
@@ -389,6 +355,26 @@ public class WirelessAdbActivity extends AppCompatActivity {
                     wrapper.setExecutable(true);
                     installed++;
                 }
+                // Also install the `adb` command — different from system command wrappers.
+                // Sends `shell:<args>` so user can run `adb shell id -u` to get 2000.
+                File adbWrapper = new File(binDir, "adb");
+                if (adbWrapper.exists()) {
+                    String firstLine = readFirstLine(adbWrapper);
+                    if (firstLine != null && firstLine.contains("ADB-routed")) {
+                    } else {
+                        File adbOrig = new File(binDir, "adb.orig");
+                        if (!adbOrig.exists()) {
+                            copyFile(adbWrapper, adbOrig);
+                            backed++;
+                        }
+                    }
+                }
+                String adbContent = buildAdbWrapperContent(pkg);
+                try (OutputStream out = new FileOutputStream(adbWrapper)) {
+                    out.write(adbContent.getBytes(StandardCharsets.UTF_8));
+                }
+                adbWrapper.setExecutable(true);
+                installed++;
             } catch (Exception e) {
                 error = e.getMessage();
             }
@@ -400,8 +386,9 @@ public class WirelessAdbActivity extends AppCompatActivity {
                     Toast.makeText(this, "Lỗi cài CLI: " + finalError, Toast.LENGTH_LONG).show();
                 } else {
                     String msg = "Đã cài " + finalInstalled + " CLI wrappers vào $PREFIX/bin/\n"
-                        + "pm, cmd, am, dumpsys, settings, input, svc\n"
-                        + "→ giờ chạy trực tiếp trong terminal sẽ đi qua ADB (UID 2000)";
+                        + "adb, pm, cmd, am, dumpsys, settings, input, svc\n"
+                        + "→ giờ chạy trực tiếp trong terminal sẽ đi qua ADB (UID 2000)\n"
+                        + "Kiểm tra: adb shell id -u → phải trả 2000";
                     if (finalBacked > 0) {
                         msg += "\n(đã backup " + finalBacked + " file gốc → *.orig)";
                     }
@@ -411,7 +398,47 @@ public class WirelessAdbActivity extends AppCompatActivity {
         });
     }
 
-    /** Builds the wrapper script content for a given command. */
+    private static String buildAdbWrapperContent(String pkg) {
+        String receiver = pkg + "/.app.adb.AdbService$AdbCommandReceiver";
+        return "#!/data/data/" + pkg + "/files/usr/bin/sh\n"
+            + "# adb — ADB-routed wrapper: runs commands through ADB shell (UID 2000)\n"
+            + "# Usage: adb shell <command>  OR  adb <command>\n"
+            + "\n"
+            + "if [ $# -eq 0 ]; then\n"
+            + "    echo \"Usage: adb shell <command...>\" >&2\n"
+            + "    echo \"Example: adb shell id -u\" >&2\n"
+            + "    exit 1\n"
+            + "fi\n"
+            + "\n"
+            + "if [ \"$1\" = \"shell\" ]; then\n"
+            + "    shift\n"
+            + "fi\n"
+            + "\n"
+            + "OUTFILE=\"/tmp/adb_out_$$.txt\"\n"
+            + "rm -f \"$OUTFILE\"\n"
+            + "\n"
+            + "am broadcast -a com.termux.adb.RUN_COMMAND -n '" + receiver + "' \\\n"
+            + "    --es command \"shell:$*\" \\\n"
+            + "    --es outfile \"$OUTFILE\" >/dev/null 2>&1\n"
+            + "\n"
+            + "i=0\n"
+            + "while [ $i -lt 100 ]; do\n"
+            + "    [ -f \"$OUTFILE\" ] && break\n"
+            + "    i=$((i + 1))\n"
+            + "    sleep 0.1\n"
+            + "done\n"
+            + "\n"
+            + "if [ -f \"$OUTFILE\" ]; then\n"
+            + "    cat \"$OUTFILE\"\n"
+            + "    rm -f \"$OUTFILE\"\n"
+            + "    exit 0\n"
+            + "fi\n"
+            + "\n"
+            + "rm -f \"$OUTFILE\"\n"
+            + "echo \"Lỗi: ADB service chưa chạy. Mở Termux → ADB không dây → KẾT NỐI.\" >&2\n"
+            + "exit 1\n";
+    }
+
     private static String buildWrapperContent(String cmd, String fallback, String pkg) {
         String receiver = pkg + "/.app.adb.AdbService$AdbCommandReceiver";
         return "#!/data/data/" + pkg + "/files/usr/bin/sh\n"
