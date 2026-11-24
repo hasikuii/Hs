@@ -172,7 +172,11 @@ public class AdbService extends Service {
                     mMain.post(() -> updateNotification("ADB service đang chạy (đã kết nối lại)"));
                     break;
                 } catch (Exception e) {
-                    mMain.post(() -> updateNotification("Đang thử kết nối lại… (lần sau " + backoff + "s)"));
+                    // Capture backoff into a final local for the lambda —
+                    // Java requires lambda-captured variables to be final
+                    // or effectively final, but backoff is reassigned below.
+                    final int currentBackoff = backoff;
+                    mMain.post(() -> updateNotification("Đang thử kết nối lại… (lần sau " + currentBackoff + "s)"));
                     try { Thread.sleep(backoff * 1000L); } catch (InterruptedException ie) { break; }
                     backoff = Math.min(backoff * 2, 30);
                 }
