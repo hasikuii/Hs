@@ -10,8 +10,10 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * ZArchiver/RAR-style dialogs for compression, archive inspection/extraction,
@@ -95,33 +98,139 @@ public final class WorkspaceArchiveDialogs {
                     return;
                 }
                 int checkedId = formatGroup.getCheckedRadioButtonId();
-                WorkspaceArchiveHelper.ArchiveFormat format = checkedId == 1002
+                final WorkspaceArchiveHelper.ArchiveFormat format = checkedId == 1002
                     ? WorkspaceArchiveHelper.ArchiveFormat.TAR_GZ
                     : (checkedId == 1003 ? WorkspaceArchiveHelper.ArchiveFormat.TAR : WorkspaceArchiveHelper.ArchiveFormat.ZIP);
 
                 String fileName = rawName.toLowerCase(Locale.ROOT).endsWith(format.extension)
                     ? rawName
                     : rawName + format.extension;
-                File outArchive = WorkspaceArchiveHelper.resolveUniqueTarget(outputDir, fileName, false);
+                final File outArchive = WorkspaceArchiveHelper.resolveUniqueTarget(outputDir, fileName, false);
 
-                Toast.makeText(context, "Đang nén " + sources.size() + " mục…", Toast.LENGTH_SHORT).show();
-                EXECUTOR.execute(() -> {
-                    try {
-                        WorkspaceArchiveHelper.compress(sources, outArchive, format);
-                        MAIN.post(() -> {
-                            Toast.makeText(context,
-                                "Đã nén thành: " + outArchive.getName() + " (" + formatSize(outArchive.length()) + ")",
-                                Toast.LENGTH_LONG).show();
-                            onCompleted.run();
-                        });
-                    } catch (IOException e) {
-                        MAIN.post(() -> Toast.makeText(context,
-                            "Lỗi nén: " + e.getMessage(), Toast.LENGTH_LONG).show());
-                    }
-                });
+                startCompressWithProgress(context, sources, outArchive, format, onCompleted);
             })
             .setNegativeButton(R.string.editor_cancel, null)
             .show();
+    }
+
+    /**
+     * Build and show a modal progress dialog while compression runs on the
+     * background executor. The dialog is non-cancelable by outside touch but
+     * has a Cancel button that flips an {@link AtomicBoolean} which the worker
+     * checks between every 64 KB chunk via the {@code CompressProgress}
+     * callback. This fixes the previous behaviour where compressing a 1+ GB
+     * file showed no feedback, looked like a freeze, and offered no way to
+     * abort.
+     */
+    private static void startCompressWithProgress(@NonNull Context context,
+                                                  @NonNull List<File> sources,
+                                                  @NonNull File outArchive,
+                                                  @NonNull WorkspaceArchiveHelper.ArchiveFormat format,
+                                                  @NonNull Runnable onCompleted) {
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AtomicBoolean dialogShown = new AtomicBoolean(false);
+
+        float d = context.getResources().getDisplayMetrics().density;
+        int pad = (int) (16 * d);
+
+        LinearLayout progressView = new LinearLayout(context);
+        progressView.setOrientation(LinearLayout.VERTICAL);
+        progressView.setPadding(pad, pad / 2, pad, 0);
+
+        final ProgressBar bar = new ProgressBar(context, null,
+            android.R.attr.progressBarStyleHorizontal);
+        bar.setIndeterminate(false);
+        bar.setMax(1000); // we'll set progress as per-mille of totalBytes
+        bar.setProgress(0);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        progressView.addView(bar, barLp);
+
+        final TextView statusText = new TextView(context);
+        statusText.setPadding(0, (int) (8 * d), 0, 0);
+        statusText.setText("Đang chuẩn bị…");
+        progressView.addView(statusText, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final AlertDialog progress = new AlertDialog.Builder(context)
+            .setTitle("Đang nén " + sources.size() + " mục")
+            .setView(progressView)
+            .setCancelable(false)
+            .setNegativeButton("Hủy", (dialog, which) -> cancelled.set(true))
+            .show();
+        dialogShown.set(true);
+
+        final WorkspaceArchiveHelper.CompressProgress callback = new WorkspaceArchiveHelper.CompressProgress() {
+            @Override
+            public void onProgress(long bytesWritten, long totalBytes, String currentFile) {
+                if (!dialogShown.get()) return;
+                MAIN.post(() -> {
+                    if (!dialogShown.get()) return;
+                    String label;
+                    if (totalBytes > 0) {
+                        int perMille = (int) Math.min(1000L, bytesWritten * 1000L / totalBytes);
+                        bar.setProgress(perMille);
+                        label = WorkspaceArchiveHelper.formatSize(bytesWritten) + " / "
+                            + WorkspaceArchiveHelper.formatSize(totalBytes)
+                            + " • " + currentFile;
+                    } else {
+                        label = WorkspaceArchiveHelper.formatSize(bytesWritten) + " • " + currentFile;
+                    }
+                    statusText.setText(label);
+                });
+            }
+
+            @Override
+            public boolean isCancelled() {
+                return cancelled.get();
+            }
+        };
+
+        EXECUTOR.execute(() -> {
+            File writtenFile = null;
+            Throwable error = null;
+            try {
+                writtenFile = WorkspaceArchiveHelper.compress(sources, outArchive, format, callback);
+            } catch (Throwable t) {
+                error = t;
+            }
+            final File finalWritten = writtenFile;
+            final Throwable finalError = error;
+            MAIN.post(() -> {
+                if (dialogShown.get() && progress.isShowing()) {
+                    try { progress.dismiss(); } catch (Exception ignored) {}
+                }
+                if (cancelled.get()) {
+                    if (finalWritten != null && finalWritten.exists()) {
+                        //noinspection ResultOfMethodCallIgnored
+                        finalWritten.delete();
+                    }
+                    Toast.makeText(context, "Đã hủy nén", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (finalError != null) {
+                    Toast.makeText(context,
+                        "Lỗi nén: " + finalError.getMessage(),
+                        Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (finalWritten != null && !finalWritten.getAbsolutePath().equals(outArchive.getAbsolutePath())) {
+                    // Format was auto-switched (e.g. ZIP → TAR.GZ for >2 GB file).
+                    Toast.makeText(context,
+                        "Đã tự đổi sang .tar.gz do file quá lớn cho ZIP.\nĐã nén: "
+                            + finalWritten.getName()
+                            + " (" + WorkspaceArchiveHelper.formatSize(finalWritten.length()) + ")",
+                        Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(context,
+                        "Đã nén thành: " + (finalWritten != null ? finalWritten.getName() : "?")
+                            + " (" + (finalWritten != null
+                                ? WorkspaceArchiveHelper.formatSize(finalWritten.length()) : "?") + ")",
+                        Toast.LENGTH_LONG).show();
+                }
+                onCompleted.run();
+            });
+        });
     }
 
     public static void showArchiveQuickMenu(@NonNull Context context,
@@ -307,8 +416,9 @@ public final class WorkspaceArchiveDialogs {
 
     @NonNull
     private static String formatSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024L * 1024L) return String.format(Locale.US, "%.1f KB", bytes / 1024.0);
-        return String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0));
+        // Delegate to the helper so all callers share the same GB/TB-aware
+        // formatter. Previously this stopped at MB and printed "1024.00 MB"
+        // for a 1 GiB file.
+        return WorkspaceArchiveHelper.formatSize(bytes);
     }
 }

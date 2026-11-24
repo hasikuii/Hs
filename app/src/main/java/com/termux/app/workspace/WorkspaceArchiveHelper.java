@@ -70,9 +70,36 @@ public final class WorkspaceArchiveHelper {
         }
     }
 
-    private static final int BUFFER_SIZE = 32768;
+    /**
+     * Worst-case buffer size for streaming copy / compress operations.
+     * 64 KB balances syscall overhead (fewer reads/writes) against memory
+     * pressure on low-end devices. For very large files (>1 GB) this keeps
+     * the inner copy loop to ~16 k iterations per GB instead of ~32 k.
+     */
+    private static final int BUFFER_SIZE = 65536;
+
+    /** ZIP format hard limits (without ZIP64 extensions, which Android API < 24 lacks). */
+    private static final long ZIP_MAX_SINGLE_FILE = 2L * 1024 * 1024 * 1024;        // 2 GiB
+    private static final long ZIP_MAX_TOTAL_SIZE  = 4L * 1024 * 1024 * 1024 - 1;    // ~4 GiB
 
     private WorkspaceArchiveHelper() {}
+
+    /**
+     * Progress / cancellation callback for long-running compress operations.
+     * Implementations should be lightweight (called once per ~64 KB chunk).
+     */
+    public interface CompressProgress {
+        /**
+         * Called from the compress worker thread before each file is added.
+         * @param bytesWritten cumulative bytes written to the output stream
+         * @param totalBytes    pre-computed total uncompressed size of all sources
+         * @param currentFile   short label of the file currently being compressed
+         */
+        void onProgress(long bytesWritten, long totalBytes, String currentFile);
+
+        /** @return true if the user requested cancellation; compress() will throw IOException. */
+        boolean isCancelled();
+    }
 
     public static boolean isArchiveFile(@NonNull File file) {
         if (!file.isFile()) return false;
@@ -236,33 +263,151 @@ public final class WorkspaceArchiveHelper {
     public static void compress(@NonNull List<File> sources,
                                 @NonNull File outArchive,
                                 @NonNull ArchiveFormat format) throws IOException {
+        compress(sources, outArchive, format, null);
+    }
+
+    /**
+     * Compress one or more files / directories into an archive.
+     *
+     * <p>This overload accepts a {@link CompressProgress} callback so the caller can
+     * show a progress dialog and let the user cancel. It also performs two safety
+     * checks that the legacy 3-arg overload skipped and that caused failures on
+     * files / folders larger than ~1 GB:
+     *
+     * <ol>
+     *   <li><b>Free-space check</b>. Before opening any stream we compare the
+     *       total uncompressed size of the sources against
+     *       {@code outArchive.getParentFile().getUsableSpace()}. The worst case
+     *       (already-compressed inputs) is that the archive is roughly the same
+     *       size as the sources, so we require at least the full source size of
+     *       free space. Failing this up front produces a readable Vietnamese
+     *       error instead of a cryptic {@code ENOSPC} halfway through.</li>
+     *
+     *   <li><b>ZIP → TAR.GZ fallback for large inputs</b>. The classic ZIP
+     *       format caps single entries at 4 GiB and the total archive at 4 GiB
+     *       (32-bit offsets in the central directory). Android's
+     *       {@link java.util.zip.ZipOutputStream} on API &lt; 24 does not emit
+     *       ZIP64 extensions, so any single file &gt; 2 GiB or total &gt; 4 GiB
+     *       throws {@link java.util.zip.ZipException}. Rather than crash, we
+     *       silently switch the format to {@link ArchiveFormat#TAR_GZ} (which
+     *       has no practical size limit on the TAR side and uses gzip's
+     *       32-bit length wrap which is handled by all standard tools) and
+     *       adjust the output file extension accordingly.</li>
+     * </ol>
+     *
+     * @param progress optional callback; null = no progress / no cancellation
+     * @return the actual file written (may differ from {@code outArchive} if
+     *         the format was auto-switched — caller should use this return
+     *         value when posting the success Toast).
+     */
+    @NonNull
+    public static File compress(@NonNull List<File> sources,
+                                @NonNull File outArchive,
+                                @NonNull ArchiveFormat format,
+                                @Nullable CompressProgress progress) throws IOException {
         File parent = outArchive.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             throw new IOException("Không thể tạo thư mục chứa file nén");
         }
+
+        // ---- 1. Compute total uncompressed size --------------------------------
+        long totalBytes = 0L;
+        boolean hasSingleFileOverZipLimit = false;
+        for (File src : sources) {
+            if (!src.exists()) continue;
+            DirStats stats = computeStats(src);
+            totalBytes += stats.totalBytes;
+            if (src.isFile() && src.length() > ZIP_MAX_SINGLE_FILE) {
+                hasSingleFileOverZipLimit = true;
+            }
+            // Walk the tree once more to also detect nested > 2 GiB files
+            // (computeStats only sums sizes; it doesn't flag individual big files).
+            if (!hasSingleFileOverZipLimit) {
+                hasSingleFileOverZipLimit = containsOversizedFile(src, ZIP_MAX_SINGLE_FILE);
+            }
+        }
+
+        // ---- 2. Free-space check -----------------------------------------------
+        // Worst case: archive is ~ same size as sources (already-compressed data).
+        // Require at least the full source size of free space; if TAR or ZIP
+        // actually compresses, the leftover space is unused, which is fine.
+        if (parent != null && totalBytes > 0) {
+            long usable = parent.getUsableSpace();
+            if (usable > 0 && usable < totalBytes) {
+                throw new IOException("Không đủ dung lượng trống. Cần ít nhất "
+                    + formatSize(totalBytes) + " nhưng chỉ còn " + formatSize(usable)
+                    + " tại " + parent.getAbsolutePath());
+            }
+        }
+
+        // ---- 3. ZIP → TAR.GZ fallback for oversized inputs ---------------------
+        if (format == ArchiveFormat.ZIP
+                && (hasSingleFileOverZipLimit || totalBytes > ZIP_MAX_TOTAL_SIZE)) {
+            // Switch format and rewrite the output path so the extension matches.
+            format = ArchiveFormat.TAR_GZ;
+            String baseName = stripArchiveExtension(outArchive.getName());
+            outArchive = new File(outArchive.getParentFile(),
+                baseName + ArchiveFormat.TAR_GZ.extension);
+        }
+
+        // ---- 4. Real compress --------------------------------------------------
         if (format == ArchiveFormat.ZIP) {
-            try (ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(outArchive)))) {
+            try (ZipOutputStream zos = new ZipOutputStream(
+                    new BufferedOutputStream(new FileOutputStream(outArchive), BUFFER_SIZE))) {
                 for (File src : sources) {
                     if (src.exists()) {
-                        writeZipEntry(src, src.getName(), zos, outArchive);
+                        writeZipEntry(src, src.getName(), zos, outArchive, progress, totalBytes, new long[]{0L});
                     }
                 }
             }
         } else {
-            OutputStream fileOut = new BufferedOutputStream(new FileOutputStream(outArchive));
+            OutputStream fileOut = new BufferedOutputStream(new FileOutputStream(outArchive), BUFFER_SIZE);
             OutputStream streamOut = format == ArchiveFormat.TAR_GZ
                 ? new GZIPOutputStream(fileOut)
                 : fileOut;
             try (OutputStream out = streamOut) {
+                long[] written = {0L};
                 for (File src : sources) {
                     if (src.exists()) {
-                        writeTarEntry(src, src.getName(), out, outArchive);
+                        writeTarEntry(src, src.getName(), out, outArchive, progress, totalBytes, written);
                     }
                 }
-                // Two 512-byte zero blocks terminate a TAR archive
                 out.write(new byte[1024]);
             }
         }
+        return outArchive;
+    }
+
+    /** Walks {@code root} and returns true if any single file exceeds {@code limit} bytes. */
+    private static boolean containsOversizedFile(@NonNull File root, long limit) {
+        if (root.isFile()) return root.length() > limit;
+        if (root.isDirectory()) {
+            File[] children = root.listFiles();
+            if (children == null) return false;
+            for (File child : children) {
+                if (containsOversizedFile(child, limit)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Human-readable byte size, supports up to TiB. Public so dialogs and
+     * callers can share the same formatting (and not stop at MB like the
+     * previous version, which printed "1024.00 MB" for 1 GiB).
+     */
+    @NonNull
+    public static String formatSize(long bytes) {
+        if (bytes < 0) return "—";
+        if (bytes < 1024L) return bytes + " B";
+        double v = bytes;
+        String[] units = {"KB", "MB", "GB", "TB"};
+        int idx = -1;
+        do {
+            v /= 1024.0;
+            idx++;
+        } while (v >= 1024.0 && idx < units.length - 1);
+        return String.format(Locale.US, "%.2f %s", v, units[idx]);
     }
 
     @NonNull
@@ -351,8 +496,14 @@ public final class WorkspaceArchiveHelper {
     private static void writeZipEntry(@NonNull File file,
                                       @NonNull String entryPath,
                                       @NonNull ZipOutputStream zos,
-                                      @NonNull File outArchive) throws IOException {
+                                      @NonNull File outArchive,
+                                      @Nullable CompressProgress progress,
+                                      long totalBytes,
+                                      @NonNull long[] writtenAccum) throws IOException {
         if (file.getCanonicalPath().equals(outArchive.getCanonicalPath())) return;
+        if (progress != null && progress.isCancelled()) {
+            throw new IOException("Đã hủy nén");
+        }
         if (file.isDirectory()) {
             String dirEntry = entryPath.endsWith("/") ? entryPath : entryPath + "/";
             zos.putNextEntry(new ZipEntry(dirEntry));
@@ -360,7 +511,8 @@ public final class WorkspaceArchiveHelper {
             File[] children = file.listFiles();
             if (children != null) {
                 for (File child : children) {
-                    writeZipEntry(child, dirEntry + child.getName(), zos, outArchive);
+                    writeZipEntry(child, dirEntry + child.getName(), zos, outArchive,
+                        progress, totalBytes, writtenAccum);
                 }
             }
         } else {
@@ -368,10 +520,15 @@ public final class WorkspaceArchiveHelper {
             entry.setTime(file.lastModified());
             zos.putNextEntry(entry);
             byte[] buf = new byte[BUFFER_SIZE];
-            try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
+            if (progress != null) progress.onProgress(writtenAccum[0], totalBytes, file.getName());
+            try (InputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE)) {
                 int len;
                 while ((len = in.read(buf)) > 0) {
+                    if (progress != null && progress.isCancelled()) {
+                        throw new IOException("Đã hủy nén");
+                    }
                     zos.write(buf, 0, len);
+                    writtenAccum[0] += len;
                 }
             }
             zos.closeEntry();
@@ -381,8 +538,14 @@ public final class WorkspaceArchiveHelper {
     private static void writeTarEntry(@NonNull File file,
                                       @NonNull String entryPath,
                                       @NonNull OutputStream out,
-                                      @NonNull File outArchive) throws IOException {
+                                      @NonNull File outArchive,
+                                      @Nullable CompressProgress progress,
+                                      long totalBytes,
+                                      @NonNull long[] writtenAccum) throws IOException {
         if (file.getCanonicalPath().equals(outArchive.getCanonicalPath())) return;
+        if (progress != null && progress.isCancelled()) {
+            throw new IOException("Đã hủy nén");
+        }
         boolean isDir = file.isDirectory();
         String normalizedPath = isDir && !entryPath.endsWith("/") ? entryPath + "/" : entryPath;
         byte[] pathBytes = normalizedPath.getBytes(StandardCharsets.UTF_8);
@@ -409,11 +572,16 @@ public final class WorkspaceArchiveHelper {
         if (!isDir) {
             byte[] buf = new byte[BUFFER_SIZE];
             long written = 0;
-            try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
+            if (progress != null) progress.onProgress(writtenAccum[0], totalBytes, file.getName());
+            try (InputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE)) {
                 int len;
                 while ((len = in.read(buf)) > 0) {
+                    if (progress != null && progress.isCancelled()) {
+                        throw new IOException("Đã hủy nén");
+                    }
                     out.write(buf, 0, len);
                     written += len;
+                    writtenAccum[0] += len;
                 }
             }
             int pad = (int) ((512 - (written % 512)) % 512);
@@ -422,7 +590,8 @@ public final class WorkspaceArchiveHelper {
             File[] children = file.listFiles();
             if (children != null) {
                 for (File child : children) {
-                    writeTarEntry(child, normalizedPath + child.getName(), out, outArchive);
+                    writeTarEntry(child, normalizedPath + child.getName(), out, outArchive,
+                        progress, totalBytes, writtenAccum);
                 }
             }
         }
