@@ -65,7 +65,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
     private TextView mOutput;
     private LinearLayout mSdkWarning;
 
-    /** Cached result of {@code Build.VERSION.SDK_INT >= R}. */
     private boolean mAdbSupported;
 
     @Override
@@ -93,11 +92,8 @@ public class WirelessAdbActivity extends AppCompatActivity {
         mAdbSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
         mSdkWarning.setVisibility(mAdbSupported ? View.GONE : View.VISIBLE);
         mConnectBtn.setEnabled(mAdbSupported);
-        // Pair button starts disabled; updatePairButtonState() enables it once
-        // both port + 6-digit code are entered.
         mPairBtn.setEnabled(false);
 
-        // Re-validate on every keystroke.
         TextWatcher pairWatcher = new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
@@ -109,23 +105,14 @@ public class WirelessAdbActivity extends AppCompatActivity {
         mPairPort.addTextChangedListener(pairWatcher);
         mPairCode.addTextChangedListener(pairWatcher);
 
-        // Re-validate when an EditText loses focus. This catches a class of
-        // edge cases that afterTextChanged misses:
-        //  - Activity recreated after process death (savedInstanceState restores
-        //    text into the EditTexts BEFORE the TextWatcher is attached).
-        //  - IME auto-fill / voice input that bypasses the Editable pipeline.
-        //  - Paste from clipboard that arrives as a single batch event.
         View.OnFocusChangeListener focusValidator = (v, hasFocus) -> {
             if (!hasFocus) updatePairButtonState();
         };
         mPairPort.setOnFocusChangeListener(focusValidator);
         mPairCode.setOnFocusChangeListener(focusValidator);
 
-        // Initial validation: handles restored instance state that bypassed the
-        // TextWatcher, and is also a no-op when fields are empty.
         updatePairButtonState();
 
-        // Load / generate the adb keypair in background and display fingerprint.
         mExecutor.execute(() -> {
             try {
                 final String fp = mKeyManager.getFingerprint();
@@ -148,41 +135,18 @@ public class WirelessAdbActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Re-validate when returning to the activity (e.g. after the user
-        // switched to Android's wireless-debugging screen to copy the port
-        // and pairing code, then came back here).
         updatePairButtonState();
     }
 
-    /**
-     * Recomputes whether the "Ghép nối" button should be enabled.
-     *
-     * <p>The button becomes enabled only when:
-     * <ul>
-     *   <li>Device is Android 11+ ({@code mAdbSupported}), AND</li>
-     *   <li>The port field is non-empty, AND</li>
-     *   <li>The code field contains exactly 6 digits (after stripping any
-     *       non-digit characters — defensive against IME separators, full-width
-     *       digits, and Unicode whitespace that {@code trim()} does not remove).</li>
-     * </ul>
-     *
-     * <p>This method is called from three triggers (TextWatcher, focus change,
-     * onResume) so that no realistic user input path can leave the button stuck
-     * in the wrong state.
-     */
     private void updatePairButtonState() {
         try {
             String port = mPairPort.getText() == null ? ""
                 : mPairPort.getText().toString().trim();
             String code = mPairCode.getText() == null ? ""
                 : mPairCode.getText().toString().trim();
-            // Strip everything that isn't an ASCII digit — protects against
-            // keyboard-injected separators and invisible Unicode characters
-            // that would otherwise inflate the visible char count.
             String codeDigits = code.replaceAll("\\D", "");
             mPairBtn.setEnabled(mAdbSupported && !port.isEmpty() && codeDigits.length() == 6);
         } catch (Exception ignored) {
-            // Never crash on validation — leave the button in its current state.
         }
     }
 
@@ -199,17 +163,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
         });
     }
 
-    /**
-     * Run the SPAKE2 pairing handshake against {@code host:pairPort} with the
-     * 6-digit code the user entered. The actual protocol is implemented in
-     * {@link PairingClient} (TLS 1.3 + SPAKE2 + AES-128-GCM + peer-info
-     * exchange, mirroring AOSP {@code pairing_client.cpp}). On success the
-     * server has written our RSA pubkey to {@code /data/misc/adb/adb_keys}
-     * and a subsequent Connect will succeed.
-     *
-     * <p>The handshake runs on the background executor; the UI shows a
-     * non-cancelable progress dialog and re-enables the button when done.
-     */
     private void doPair() {
         final String portStr = mPairPort.getText() == null ? "" : mPairPort.getText().toString().trim();
         final String code = mPairCode.getText() == null ? "" : mPairCode.getText().toString().trim();
@@ -299,7 +252,8 @@ public class WirelessAdbActivity extends AppCompatActivity {
                 AdbConnection conn = AdbConnection.create(HOST, port, kp.getPrivateKey(), kp.getCertificate(), Build.VERSION.SDK_INT);
                 conn.connect(15, TimeUnit.SECONDS, false);
                 mConnection = conn;
-                setStatus("Đã kết nối. Shell UID = 2000 (shell). Chạy lệnh bên dưới.");
+                AdbService.startWithConnection(WirelessAdbActivity.this, mKeyManager, HOST, port, conn);
+                setStatus("Đã kết nối. Shell UID = 2000 (shell). Chạy lệnh bên dưới.\nService chạy ngầm — thoát app vẫn giữ kết nối.");
                 mMain.post(() -> {
                     mConnectBtn.setEnabled(false);
                     mDisconnectBtn.setEnabled(true);
@@ -314,26 +268,38 @@ public class WirelessAdbActivity extends AppCompatActivity {
     }
 
     private void doDisconnect() {
-        if (mConnection == null) {
+        if (mConnection == null && AdbService.getConnection() == null) {
             return;
         }
-        mExecutor.execute(() -> {
-            try {
-                mConnection.close();
-            } catch (IOException ignored) {
-            }
-            mConnection = null;
+        AdbService.stop(this);
+        final AdbConnection conn = mConnection;
+        mConnection = null;
+        if (conn != null) {
+            mExecutor.execute(() -> {
+                try {
+                    conn.close();
+                } catch (IOException ignored) {
+                }
+                setStatus("Đã ngắt kết nối.");
+                mMain.post(() -> {
+                    mConnectBtn.setEnabled(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R);
+                    mDisconnectBtn.setEnabled(false);
+                    mRunBtn.setEnabled(false);
+                });
+            });
+        } else {
             setStatus("Đã ngắt kết nối.");
             mMain.post(() -> {
                 mConnectBtn.setEnabled(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R);
                 mDisconnectBtn.setEnabled(false);
                 mRunBtn.setEnabled(false);
             });
-        });
+        }
     }
 
     private void runCommand() {
-        if (mConnection == null) {
+        final AdbConnection conn = mConnection != null ? mConnection : AdbService.getConnection();
+        if (conn == null) {
             Toast.makeText(this, "Chưa kết nối", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -343,7 +309,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
         }
         mRunBtn.setEnabled(false);
         appendOutput("$ " + cmd);
-        final AdbConnection conn = mConnection;
         mExecutor.execute(() -> {
             try {
                 AdbStream stream = conn.open("shell:" + cmd);
@@ -366,11 +331,13 @@ public class WirelessAdbActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (mConnection != null) {
+        if (mConnection != null && AdbService.getConnection() == null) {
+            final AdbConnection conn = mConnection;
             mExecutor.execute(() -> {
-                try { mConnection.close(); } catch (IOException ignored) {}
+                try { conn.close(); } catch (IOException ignored) {}
             });
         }
+        mConnection = null;
         mExecutor.shutdownNow();
     }
 }
