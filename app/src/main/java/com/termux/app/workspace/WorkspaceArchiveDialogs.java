@@ -6,13 +6,16 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -114,12 +117,12 @@ public final class WorkspaceArchiveDialogs {
     }
 
     /**
-     * Build and show a modal progress dialog while compression runs on the
-     * background executor. The dialog is non-cancelable by outside touch but
-     * has a Cancel button that flips an AtomicBoolean which the worker
-     * checks between every 64 KB chunk via the CompressProgress callback.
-     * This fixes the previous behaviour where compressing a 1+ GB file showed
-     * no feedback, looked like a freeze, and offered no way to abort.
+     * ZArchiver-style progress dialog: percentage label, full file path,
+     * "Giữ cho màn hình bật" checkbox (WakeLock), and "Ẩn" (Hide) button
+     * that dismisses the dialog but keeps compression running in the
+     * background. On completion, if any files were skipped, a separate
+     * scrollable "Log lỗi chi tiết" dialog lists each skipped file's full
+     * path + error message, with a "Sao chép log" button.
      */
     private static void startCompressWithProgress(@NonNull Context context,
                                                   @NonNull List<File> sources,
@@ -128,6 +131,8 @@ public final class WorkspaceArchiveDialogs {
                                                   @NonNull Runnable onCompleted) {
         final AtomicBoolean cancelled = new AtomicBoolean(false);
         final AtomicBoolean dialogShown = new AtomicBoolean(false);
+        final AtomicBoolean hidden = new AtomicBoolean(false);
+        final List<String> errorLog = new ArrayList<>();
 
         float d = context.getResources().getDisplayMetrics().density;
         int pad = (int) (16 * d);
@@ -145,37 +150,71 @@ public final class WorkspaceArchiveDialogs {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         progressView.addView(bar, barLp);
 
+        final TextView percentText = new TextView(context);
+        percentText.setPadding(0, (int) (4 * d), 0, 0);
+        percentText.setText("0%");
+        progressView.addView(percentText, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         final TextView statusText = new TextView(context);
         statusText.setPadding(0, (int) (8 * d), 0, 0);
         statusText.setText("Đang chuẩn bị…");
+        statusText.setSingleLine(true);
+        statusText.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
         progressView.addView(statusText, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        final CheckBox keepScreenCb = new CheckBox(context);
+        keepScreenCb.setText("Giữ cho màn hình bật");
+        keepScreenCb.setPadding(0, (int) (8 * d), 0, 0);
+        progressView.addView(keepScreenCb, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         final AlertDialog progress = new AlertDialog.Builder(context)
-            .setTitle("Đang nén " + sources.size() + " mục")
+            .setTitle("Đang nén: " + outArchive.getName())
             .setView(progressView)
             .setCancelable(false)
             .setNegativeButton("Hủy", (dialog, which) -> cancelled.set(true))
+            .setNeutralButton("Ẩn", (dialog, which) -> {
+                hidden.set(true);
+                dialogShown.set(false);
+                dialog.dismiss();
+            })
             .show();
         dialogShown.set(true);
+
+        final PowerManager.WakeLock[] wakeLockHolder = new PowerManager.WakeLock[1];
+        keepScreenCb.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked) {
+                if (wakeLockHolder[0] == null) {
+                    PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                    if (pm != null) {
+                        wakeLockHolder[0] = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "Termux:Compress");
+                        wakeLockHolder[0].setReferenceCounted(false);
+                    }
+                }
+                if (wakeLockHolder[0] != null) {
+                    try { wakeLockHolder[0].acquire(); } catch (Exception ignored) {}
+                }
+            } else {
+                if (wakeLockHolder[0] != null && wakeLockHolder[0].isHeld()) {
+                    try { wakeLockHolder[0].release(); } catch (Exception ignored) {}
+                }
+            }
+        });
 
         final WorkspaceArchiveHelper.CompressProgress callback = new WorkspaceArchiveHelper.CompressProgress() {
             @Override
             public void onProgress(long bytesWritten, long totalBytes, String currentFile) {
                 if (!dialogShown.get()) return;
                 MAIN.post(() -> {
-                    if (!dialogShown.get()) return;
-                    String label;
+                    if (!dialogShown.get() || !progress.isShowing()) return;
                     if (totalBytes > 0) {
                         int perMille = (int) Math.min(1000L, bytesWritten * 1000L / totalBytes);
                         bar.setProgress(perMille);
-                        label = WorkspaceArchiveHelper.formatSize(bytesWritten) + " / "
-                            + WorkspaceArchiveHelper.formatSize(totalBytes)
-                            + " • " + currentFile;
-                    } else {
-                        label = WorkspaceArchiveHelper.formatSize(bytesWritten) + " • " + currentFile;
+                        percentText.setText((perMille / 10) + "%");
                     }
-                    statusText.setText(label);
+                    statusText.setText(currentFile);
                 });
             }
 
@@ -190,13 +229,17 @@ public final class WorkspaceArchiveDialogs {
             int[] skippedOut = new int[]{0};
             Throwable error = null;
             try {
-                writtenFile = WorkspaceArchiveHelper.compress(sources, outArchive, format, callback, skippedOut);
+                writtenFile = WorkspaceArchiveHelper.compress(sources, outArchive, format, callback, skippedOut, errorLog);
             } catch (Throwable t) {
                 error = t;
             }
             final File finalWritten = writtenFile;
             final int finalSkipped = skippedOut[0];
             final Throwable finalError = error;
+            final List<String> finalErrorLog = new ArrayList<>(errorLog);
+            if (wakeLockHolder[0] != null && wakeLockHolder[0].isHeld()) {
+                try { wakeLockHolder[0].release(); } catch (Exception ignored) {}
+            }
             MAIN.post(() -> {
                 if (dialogShown.get() && progress.isShowing()) {
                     try { progress.dismiss(); } catch (Exception ignored) {}
@@ -210,32 +253,74 @@ public final class WorkspaceArchiveDialogs {
                     return;
                 }
                 if (finalError != null) {
-                    Toast.makeText(context,
-                        "Lỗi nén: " + finalError.getMessage(),
-                        Toast.LENGTH_LONG).show();
+                    new AlertDialog.Builder(context)
+                        .setTitle("Lỗi nén")
+                        .setMessage(finalError.getClass().getSimpleName() + ": " + finalError.getMessage())
+                        .setPositiveButton("Đóng", null)
+                        .show();
                     return;
                 }
+                String sizeStr = finalWritten != null
+                    ? WorkspaceArchiveHelper.formatSize(finalWritten.length()) : "?";
                 String skippedNote = finalSkipped > 0
-                    ? "\nĐã bỏ qua " + finalSkipped + " tệp không đọc được (symlink hỏng / đặc biệt)"
+                    ? "\nĐã bỏ qua " + finalSkipped + " tệp không đọc được"
                     : "";
-                if (finalWritten != null && !finalWritten.getAbsolutePath().equals(outArchive.getAbsolutePath())) {
-                    Toast.makeText(context,
-                        "Đã tự đổi sang .tar.gz do file quá lớn cho ZIP.\nĐã nén: "
-                            + finalWritten.getName()
-                            + " (" + WorkspaceArchiveHelper.formatSize(finalWritten.length()) + ")"
-                            + skippedNote,
-                        Toast.LENGTH_LONG).show();
+                String successMsg = "Đã nén thành: "
+                    + (finalWritten != null ? finalWritten.getName() : "?")
+                    + " (" + sizeStr + ")" + skippedNote;
+
+                if (hidden.get()) {
+                    Toast.makeText(context, successMsg, Toast.LENGTH_LONG).show();
                 } else {
-                    Toast.makeText(context,
-                        "Đã nén thành: " + (finalWritten != null ? finalWritten.getName() : "?")
-                            + " (" + (finalWritten != null
-                                ? WorkspaceArchiveHelper.formatSize(finalWritten.length()) : "?") + ")"
-                            + skippedNote,
-                        Toast.LENGTH_LONG).show();
+                    new AlertDialog.Builder(context)
+                        .setTitle("Nén xong")
+                        .setMessage(successMsg)
+                        .setPositiveButton("Đóng", null)
+                        .show();
                 }
+
+                if (!finalErrorLog.isEmpty()) {
+                    StringBuilder logBuilder = new StringBuilder();
+                    logBuilder.append(finalErrorLog.size()).append(" tệp đã bị bỏ qua:\n\n");
+                    int shown = 0;
+                    for (String entry : finalErrorLog) {
+                        if (shown >= 50) {
+                            logBuilder.append("... và ").append(finalErrorLog.size() - 50).append(" tệp khác\n");
+                            break;
+                        }
+                        logBuilder.append(entry).append("\n");
+                        shown++;
+                    }
+                    final String logText = logBuilder.toString();
+                    MAIN.postDelayed(() -> new AlertDialog.Builder(context)
+                        .setTitle("Log lỗi chi tiết (" + finalErrorLog.size() + " tệp)")
+                        .setView(createScrollableText(context, logText))
+                        .setPositiveButton("Sao chép log", (dlg, w) -> {
+                            ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+                            if (cm != null) {
+                                cm.setPrimaryClip(ClipData.newPlainText("compress_error_log", logText));
+                                Toast.makeText(context, "Đã sao chép log", Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                        .setNegativeButton("Đóng", null)
+                        .show(), 500);
+                }
+
                 onCompleted.run();
             });
         });
+    }
+
+    private static ScrollView createScrollableText(@NonNull Context context, @NonNull String text) {
+        float d = context.getResources().getDisplayMetrics().density;
+        TextView tv = new TextView(context);
+        tv.setText(text);
+        tv.setTextSize(13);
+        tv.setPadding((int) (16 * d), (int) (12 * d), (int) (16 * d), (int) (12 * d));
+        tv.setTextIsSelectable(true);
+        ScrollView sv = new ScrollView(context);
+        sv.addView(tv);
+        return sv;
     }
 
     public static void showArchiveQuickMenu(@NonNull Context context,
@@ -330,9 +415,6 @@ public final class WorkspaceArchiveDialogs {
         });
     }
 
-    /**
-     * Extract multiple selected archives into separate, collision-safe subfolders.
-     */
     public static void runExtractBatch(@NonNull Context context,
                                        @NonNull List<File> archives,
                                        @NonNull File parentDir,
