@@ -305,6 +305,20 @@ public final class WorkspaceArchiveHelper {
                                 @NonNull File outArchive,
                                 @NonNull ArchiveFormat format,
                                 @Nullable CompressProgress progress) throws IOException {
+        return compress(sources, outArchive, format, progress, new int[]{0});
+    }
+
+    /**
+     * Compress with an explicit {@code skippedOut} counter so the caller can
+     * report how many files were skipped (broken symlinks, special files,
+     * permission denied) without aborting the whole archive.
+     */
+    @NonNull
+    public static File compress(@NonNull List<File> sources,
+                                @NonNull File outArchive,
+                                @NonNull ArchiveFormat format,
+                                @Nullable CompressProgress progress,
+                                @NonNull int[] skippedOut) throws IOException {
         File parent = outArchive.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             throw new IOException("Không thể tạo thư mục chứa file nén");
@@ -351,12 +365,17 @@ public final class WorkspaceArchiveHelper {
         }
 
         // ---- 4. Real compress --------------------------------------------------
+        // skippedOut[0] accumulates the count of files that could not be opened
+        // (broken symlinks, permission denied, special files like /dev/null in
+        // proot-distro rootfs). Such files are silently skipped so the archive
+        // still completes — previously a single unreadable file (e.g.
+        // /bin/awk → broken symlink in a debian rootfs) aborted the whole job.
         if (format == ArchiveFormat.ZIP) {
             try (ZipOutputStream zos = new ZipOutputStream(
                     new BufferedOutputStream(new FileOutputStream(outArchive), BUFFER_SIZE))) {
                 for (File src : sources) {
                     if (src.exists()) {
-                        writeZipEntry(src, src.getName(), zos, outArchive, progress, totalBytes, new long[]{0L});
+                        writeZipEntry(src, src.getName(), zos, outArchive, progress, totalBytes, new long[]{0L}, skippedOut);
                     }
                 }
             }
@@ -369,7 +388,7 @@ public final class WorkspaceArchiveHelper {
                 long[] written = {0L};
                 for (File src : sources) {
                     if (src.exists()) {
-                        writeTarEntry(src, src.getName(), out, outArchive, progress, totalBytes, written);
+                        writeTarEntry(src, src.getName(), out, outArchive, progress, totalBytes, written, skippedOut);
                     }
                 }
                 out.write(new byte[1024]);
@@ -499,7 +518,8 @@ public final class WorkspaceArchiveHelper {
                                       @NonNull File outArchive,
                                       @Nullable CompressProgress progress,
                                       long totalBytes,
-                                      @NonNull long[] writtenAccum) throws IOException {
+                                      @NonNull long[] writtenAccum,
+                                      @NonNull int[] skippedAccum) throws IOException {
         if (file.getCanonicalPath().equals(outArchive.getCanonicalPath())) return;
         if (progress != null && progress.isCancelled()) {
             throw new IOException("Đã hủy nén");
@@ -512,18 +532,33 @@ public final class WorkspaceArchiveHelper {
             if (children != null) {
                 for (File child : children) {
                     writeZipEntry(child, dirEntry + child.getName(), zos, outArchive,
-                        progress, totalBytes, writtenAccum);
+                        progress, totalBytes, writtenAccum, skippedAccum);
                 }
             }
         } else {
+            // Pre-open the input stream so we can skip unreadable files
+            // (broken symlinks, /proc /dev /sys special files, permission denied)
+            // WITHOUT aborting the whole archive. Previously a single unreadable
+            // file (e.g. /bin/awk → broken symlink in a proot-distro debian rootfs)
+            // threw FileNotFoundException all the way up and cancelled the job.
+            final InputStream in;
+            try {
+                in = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE);
+            } catch (IOException e) {
+                skippedAccum[0]++;
+                if (progress != null) {
+                    progress.onProgress(writtenAccum[0], totalBytes, "[bỏ qua] " + file.getName());
+                }
+                return;
+            }
             ZipEntry entry = new ZipEntry(entryPath);
             entry.setTime(file.lastModified());
             zos.putNextEntry(entry);
             byte[] buf = new byte[BUFFER_SIZE];
             if (progress != null) progress.onProgress(writtenAccum[0], totalBytes, file.getName());
-            try (InputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE)) {
+            try (InputStream in2 = in) {
                 int len;
-                while ((len = in.read(buf)) > 0) {
+                while ((len = in2.read(buf)) > 0) {
                     if (progress != null && progress.isCancelled()) {
                         throw new IOException("Đã hủy nén");
                     }
@@ -541,7 +576,8 @@ public final class WorkspaceArchiveHelper {
                                       @NonNull File outArchive,
                                       @Nullable CompressProgress progress,
                                       long totalBytes,
-                                      @NonNull long[] writtenAccum) throws IOException {
+                                      @NonNull long[] writtenAccum,
+                                      @NonNull int[] skippedAccum) throws IOException {
         if (file.getCanonicalPath().equals(outArchive.getCanonicalPath())) return;
         if (progress != null && progress.isCancelled()) {
             throw new IOException("Đã hủy nén");
@@ -560,22 +596,33 @@ public final class WorkspaceArchiveHelper {
             if (pad > 0) out.write(new byte[pad]);
         }
 
-        long size = isDir ? 0L : file.length();
-        byte typeFlag = isDir ? (byte) '5' : (byte) '0';
-        int mode = isDir ? 0755 : 0644;
-        String headerName = pathBytes.length > 100
-            ? new String(pathBytes, 0, 100, StandardCharsets.UTF_8)
-            : normalizedPath;
-
-        out.write(buildTarHeader(headerName, size, file.lastModified() / 1000L, typeFlag, mode));
-
+        // For regular files: try to open the stream BEFORE writing the TAR
+        // header. If the file can't be read (broken symlink, /dev/null,
+        // permission denied), skip it silently and continue — don't abort the
+        // whole archive. This is the same skip-on-error behaviour as ZIP.
         if (!isDir) {
+            final InputStream in;
+            try {
+                in = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE);
+            } catch (IOException e) {
+                skippedAccum[0]++;
+                if (progress != null) {
+                    progress.onProgress(writtenAccum[0], totalBytes, "[bỏ qua] " + file.getName());
+                }
+                return;
+            }
+            long size = file.length();
+            out.write(buildTarHeader(
+                pathBytes.length > 100
+                    ? new String(pathBytes, 0, 100, StandardCharsets.UTF_8)
+                    : normalizedPath,
+                size, file.lastModified() / 1000L, (byte) '0', 0644));
             byte[] buf = new byte[BUFFER_SIZE];
             long written = 0;
             if (progress != null) progress.onProgress(writtenAccum[0], totalBytes, file.getName());
-            try (InputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE)) {
+            try (InputStream in2 = in) {
                 int len;
-                while ((len = in.read(buf)) > 0) {
+                while ((len = in2.read(buf)) > 0) {
                     if (progress != null && progress.isCancelled()) {
                         throw new IOException("Đã hủy nén");
                     }
@@ -587,11 +634,17 @@ public final class WorkspaceArchiveHelper {
             int pad = (int) ((512 - (written % 512)) % 512);
             if (pad > 0) out.write(new byte[pad]);
         } else {
+            long size = 0L;
+            out.write(buildTarHeader(
+                pathBytes.length > 100
+                    ? new String(pathBytes, 0, 100, StandardCharsets.UTF_8)
+                    : normalizedPath,
+                size, file.lastModified() / 1000L, (byte) '5', 0755));
             File[] children = file.listFiles();
             if (children != null) {
                 for (File child : children) {
                     writeTarEntry(child, normalizedPath + child.getName(), out, outArchive,
-                        progress, totalBytes, writtenAccum);
+                        progress, totalBytes, writtenAccum, skippedAccum);
                 }
             }
         }

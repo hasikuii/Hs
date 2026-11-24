@@ -116,11 +116,10 @@ public final class WorkspaceArchiveDialogs {
     /**
      * Build and show a modal progress dialog while compression runs on the
      * background executor. The dialog is non-cancelable by outside touch but
-     * has a Cancel button that flips an {@link AtomicBoolean} which the worker
-     * checks between every 64 KB chunk via the {@code CompressProgress}
-     * callback. This fixes the previous behaviour where compressing a 1+ GB
-     * file showed no feedback, looked like a freeze, and offered no way to
-     * abort.
+     * has a Cancel button that flips an AtomicBoolean which the worker
+     * checks between every 64 KB chunk via the CompressProgress callback.
+     * This fixes the previous behaviour where compressing a 1+ GB file showed
+     * no feedback, looked like a freeze, and offered no way to abort.
      */
     private static void startCompressWithProgress(@NonNull Context context,
                                                   @NonNull List<File> sources,
@@ -140,7 +139,7 @@ public final class WorkspaceArchiveDialogs {
         final ProgressBar bar = new ProgressBar(context, null,
             android.R.attr.progressBarStyleHorizontal);
         bar.setIndeterminate(false);
-        bar.setMax(1000); // we'll set progress as per-mille of totalBytes
+        bar.setMax(1000);
         bar.setProgress(0);
         LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -188,13 +187,15 @@ public final class WorkspaceArchiveDialogs {
 
         EXECUTOR.execute(() -> {
             File writtenFile = null;
+            int[] skippedOut = new int[]{0};
             Throwable error = null;
             try {
-                writtenFile = WorkspaceArchiveHelper.compress(sources, outArchive, format, callback);
+                writtenFile = WorkspaceArchiveHelper.compress(sources, outArchive, format, callback, skippedOut);
             } catch (Throwable t) {
                 error = t;
             }
             final File finalWritten = writtenFile;
+            final int finalSkipped = skippedOut[0];
             final Throwable finalError = error;
             MAIN.post(() -> {
                 if (dialogShown.get() && progress.isShowing()) {
@@ -214,18 +215,22 @@ public final class WorkspaceArchiveDialogs {
                         Toast.LENGTH_LONG).show();
                     return;
                 }
+                String skippedNote = finalSkipped > 0
+                    ? "\nĐã bỏ qua " + finalSkipped + " tệp không đọc được (symlink hỏng / đặc biệt)"
+                    : "";
                 if (finalWritten != null && !finalWritten.getAbsolutePath().equals(outArchive.getAbsolutePath())) {
-                    // Format was auto-switched (e.g. ZIP → TAR.GZ for >2 GB file).
                     Toast.makeText(context,
                         "Đã tự đổi sang .tar.gz do file quá lớn cho ZIP.\nĐã nén: "
                             + finalWritten.getName()
-                            + " (" + WorkspaceArchiveHelper.formatSize(finalWritten.length()) + ")",
+                            + " (" + WorkspaceArchiveHelper.formatSize(finalWritten.length()) + ")"
+                            + skippedNote,
                         Toast.LENGTH_LONG).show();
                 } else {
                     Toast.makeText(context,
                         "Đã nén thành: " + (finalWritten != null ? finalWritten.getName() : "?")
                             + " (" + (finalWritten != null
-                                ? WorkspaceArchiveHelper.formatSize(finalWritten.length()) : "?") + ")",
+                                ? WorkspaceArchiveHelper.formatSize(finalWritten.length()) : "?") + ")"
+                            + skippedNote,
                         Toast.LENGTH_LONG).show();
                 }
                 onCompleted.run();
@@ -327,7 +332,6 @@ public final class WorkspaceArchiveDialogs {
 
     /**
      * Extract multiple selected archives into separate, collision-safe subfolders.
-     * This avoids overwriting files when different archives contain the same paths.
      */
     public static void runExtractBatch(@NonNull Context context,
                                        @NonNull List<File> archives,
@@ -416,9 +420,6 @@ public final class WorkspaceArchiveDialogs {
 
     @NonNull
     private static String formatSize(long bytes) {
-        // Delegate to the helper so all callers share the same GB/TB-aware
-        // formatter. Previously this stopped at MB and printed "1024.00 MB"
-        // for a 1 GiB file.
         return WorkspaceArchiveHelper.formatSize(bytes);
     }
 }
