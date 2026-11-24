@@ -85,8 +85,20 @@ public final class WorkspaceMenuBottomSheet {
     private static final int MENU_DETAILS = 16;
     private static final int MENU_PREVIEW = 17;
     private static final int MENU_FAVORITE = 18;
+    private static final int MENU_SHARE = 19;
+    private static final int MENU_TOUCH = 20;
+    private static final int MENU_HASH = 21;
     private static final String FAVORITES_PREFS = "workspace_file_manager";
     private static final String FAVORITES_KEY = "favorite_paths";
+
+    // Sort modes — kept in sync with WorkspaceFileTools preference storage.
+    private static final int SORT_NAME_ASC = 0;
+    private static final int SORT_NAME_DESC = 1;
+    private static final int SORT_SIZE_DESC = 2;
+    private static final int SORT_SIZE_ASC = 3;
+    private static final int SORT_MODIFIED_DESC = 4;
+    private static final int SORT_MODIFIED_ASC = 5;
+    private static final int SORT_TYPE_ASC = 6;
 
     private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
@@ -100,6 +112,7 @@ public final class WorkspaceMenuBottomSheet {
     private boolean mShowingFavorites = false;
     private final Set<String> mFavoritePaths = new HashSet<>();
     private String mFilterQuery = "";
+    private int mSortMode = SORT_NAME_ASC;
 
     public void show(@NonNull Activity activity, @NonNull File initialDir, @NonNull HostActions hostActions) {
         WorkspaceSessionStore store = WorkspaceSessionStore.getInstance();
@@ -108,6 +121,10 @@ public final class WorkspaceMenuBottomSheet {
             mCurrentDir = activity.getFilesDir();
         }
         store.setCurrentDirectory(activity, mCurrentDir);
+
+        // Restore persistent file-manager preferences (sort mode + hidden-files flag).
+        mShowHiddenEntries = WorkspaceFileTools.getShowHiddenPref(activity);
+        mSortMode = WorkspaceFileTools.getSortModePref(activity);
 
         BottomSheetDialog dialog = new BottomSheetDialog(activity, R.style.Theme_WorkspaceBottomSheet);
         View root = LayoutInflater.from(activity).inflate(R.layout.bottom_sheet_workspace_menu, null);
@@ -219,6 +236,9 @@ public final class WorkspaceMenuBottomSheet {
                 favoritesBtn.setText(activity.getString(R.string.workspace_favorites_button, mFavoritePaths.size()));
             }
             store.setCurrentDirectory(activity, mCurrentDir);
+            if (!mShowingFavorites) {
+                WorkspaceFileTools.recordRecentDir(activity, mCurrentDir);
+            }
             loadDirectoryEntries();
             applyFilter();
             adapter.notifyDataSetChanged();
@@ -515,60 +535,116 @@ public final class WorkspaceMenuBottomSheet {
             "Sắp xếp: tên A → Z", "Sắp xếp: tên Z → A",
             "Sắp xếp: dung lượng lớn → nhỏ", "Sắp xếp: dung lượng nhỏ → lớn",
             "Sắp xếp: mới sửa gần đây", "Sắp xếp: cũ sửa trước",
+            "Sắp xếp: theo loại tệp (đuôi file)",
             mShowHiddenEntries ? "Ẩn tệp ẩn" : "Hiện tệp ẩn",
             "Sao chép đường dẫn thư mục",
             "Chọn tất cả mục đang hiển thị", "Đảo ngược lựa chọn",
-            "Tìm kiếm sâu trong thư mục và thư mục con"
+            "Tìm kiếm sâu trong thư mục và thư mục con",
+            "Hiện thông tin ổ đĩa (dung lượng)",
+            "Thư mục đã mở gần đây"
         };
         new AlertDialog.Builder(activity).setTitle("Công cụ quản lý tệp")
             .setItems(actions, (d, which) -> {
                 switch (which) {
-                    case 0: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,a.getName().compareToIgnoreCase(b.getName()))); break;
-                    case 1: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,b.getName().compareToIgnoreCase(a.getName()))); break;
-                    case 2: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(b.length(),a.length()))); break;
-                    case 3: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(a.length(),b.length()))); break;
-                    case 4: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(b.lastModified(),a.lastModified()))); break;
-                    case 5: Collections.sort(mAllEntries, (a,b) -> compareDirsThen(a,b,Long.compare(a.lastModified(),b.lastModified()))); break;
-                    case 6: mShowHiddenEntries = !mShowHiddenEntries; reloadDirectory.run(); return;
+                    case 0:
+                        mSortMode = SORT_NAME_ASC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
+                    case 1:
+                        mSortMode = SORT_NAME_DESC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
+                    case 2:
+                        mSortMode = SORT_SIZE_DESC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
+                    case 3:
+                        mSortMode = SORT_SIZE_ASC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
+                    case 4:
+                        mSortMode = SORT_MODIFIED_DESC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
+                    case 5:
+                        mSortMode = SORT_MODIFIED_ASC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
+                    case 6:
+                        mSortMode = SORT_TYPE_ASC;
+                        WorkspaceFileTools.setSortModePref(activity, mSortMode);
+                        break;
                     case 7:
+                        mShowHiddenEntries = !mShowHiddenEntries;
+                        WorkspaceFileTools.setShowHiddenPref(activity, mShowHiddenEntries);
+                        reloadDirectory.run();
+                        return;
+                    case 8:
                         android.content.ClipboardManager cm = (android.content.ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
                         if (cm != null) {
                             cm.setPrimaryClip(android.content.ClipData.newPlainText("folder_path", mCurrentDir.getAbsolutePath()));
                             Toast.makeText(activity, "Đã sao chép đường dẫn thư mục", Toast.LENGTH_SHORT).show();
                         }
                         return;
-                    case 8:
+                    case 9:
                         for (File f : mFilteredEntries) mSelectedFilePaths.add(f.getAbsolutePath());
                         mBatchSelectMode = true; break;
-                    case 9:
+                    case 10:
                         for (File f : mFilteredEntries) {
                             String p = f.getAbsolutePath();
                             if (!mSelectedFilePaths.remove(p)) mSelectedFilePaths.add(p);
                         }
                         mBatchSelectMode = true; break;
-                    case 10:
+                    case 11:
                         showRecursiveSearchDialog(activity, mCurrentDir, result -> {
-                            if (result.isDirectory()) {
-                                mShowingFavorites = false;
-                                mCurrentDir = result;
-                                reloadDirectory.run();
-                            } else if (isPreviewableMedia(result)) {
-                                openMediaPreview(activity, result);
-                            } else if (WorkspaceArchiveHelper.isArchiveFile(result)) {
-                                WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, result,
-                                    result.getParentFile(), reloadDirectory, () -> {
-                                        parentDialog.dismiss();
-                                        hostActions.onOpenFilesInBatchEditor(
-                                            Collections.singletonList(result), result.getParentFile());
-                                    });
-                            } else {
-                                parentDialog.dismiss();
-                                hostActions.onOpenFilesInBatchEditor(
-                                    Collections.singletonList(result), result.getParentFile());
+                            if (activity.isFinishing() || activity.isDestroyed()) return;
+                            try {
+                                if (result.isDirectory()) {
+                                    mShowingFavorites = false;
+                                    mCurrentDir = result;
+                                    mFilterQuery = "";
+                                    reloadDirectory.run();
+                                    Toast.makeText(activity, "Đã chuyển đến: " + result.getName(), Toast.LENGTH_SHORT).show();
+                                } else if (isPreviewableMedia(result)) {
+                                    openMediaPreview(activity, result);
+                                } else if (WorkspaceArchiveHelper.isArchiveFile(result)) {
+                                    File archParent = result.getParentFile() != null ? result.getParentFile() : mCurrentDir;
+                                    WorkspaceArchiveDialogs.showArchiveQuickMenu(activity, result,
+                                        archParent, reloadDirectory, () -> {
+                                            if (parentDialog.isShowing()) parentDialog.dismiss();
+                                            hostActions.onOpenFilesInBatchEditor(
+                                                Collections.singletonList(result), archParent);
+                                        });
+                                } else if (result.length() > WorkspaceSessionStore.MAX_EDITABLE_FILE_BYTES) {
+                                    Toast.makeText(activity, "Tệp quá lớn (" + formatFileSize(result.length()) + ") để mở trong trình sửa.", Toast.LENGTH_LONG).show();
+                                } else {
+                                    File fileParent = result.getParentFile() != null ? result.getParentFile() : mCurrentDir;
+                                    if (parentDialog.isShowing()) parentDialog.dismiss();
+                                    hostActions.onOpenFilesInBatchEditor(
+                                        Collections.singletonList(result), fileParent);
+                                }
+                            } catch (Throwable t) {
+                                // Catch Throwable (not just Exception) to handle OutOfMemoryError,
+                                // StackOverflowError, and other Errors that would otherwise crash the app.
+                                try {
+                                    Toast.makeText(activity, "Không thể mở kết quả: " + t.getMessage(), Toast.LENGTH_LONG).show();
+                                } catch (Throwable ignored) {}
                             }
                         });
                         return;
+                    case 12:
+                        WorkspaceFileTools.showStorageDialog(activity, mCurrentDir);
+                        return;
+                    case 13:
+                        WorkspaceFileTools.showRecentDirsDialog(activity, dir -> {
+                            mShowingFavorites = false;
+                            mCurrentDir = dir;
+                            mFilterQuery = "";
+                            reloadDirectory.run();
+                        });
+                        return;
                 }
+                applySortMode();
                 applyFilter();
                 adapter.notifyDataSetChanged();
             }).show();
@@ -616,11 +692,39 @@ public final class WorkspaceMenuBottomSheet {
                 if (mShowHiddenEntries || !child.isHidden()) mAllEntries.add(child);
             }
         }
+        applySortMode();
+    }
+
+    /**
+     * Re-sorts {@link #mAllEntries} according to the current {@link #mSortMode}.
+     * Directories always come first; the secondary comparator depends on the mode.
+     */
+    private void applySortMode() {
         Collections.sort(mAllEntries, (a, b) -> {
             if (a.isDirectory() != b.isDirectory()) {
                 return a.isDirectory() ? -1 : 1;
             }
-            return a.getName().compareToIgnoreCase(b.getName());
+            switch (mSortMode) {
+                case SORT_NAME_DESC:
+                    return b.getName().compareToIgnoreCase(a.getName());
+                case SORT_SIZE_DESC:
+                    return Long.compare(b.length(), a.length());
+                case SORT_SIZE_ASC:
+                    return Long.compare(a.length(), b.length());
+                case SORT_MODIFIED_DESC:
+                    return Long.compare(b.lastModified(), a.lastModified());
+                case SORT_MODIFIED_ASC:
+                    return Long.compare(a.lastModified(), b.lastModified());
+                case SORT_TYPE_ASC: {
+                    String ea = getExtension(a.getName());
+                    String eb = getExtension(b.getName());
+                    int c = ea.compareToIgnoreCase(eb);
+                    return c != 0 ? c : a.getName().compareToIgnoreCase(b.getName());
+                }
+                case SORT_NAME_ASC:
+                default:
+                    return a.getName().compareToIgnoreCase(b.getName());
+            }
         });
     }
 
@@ -663,6 +767,11 @@ public final class WorkspaceMenuBottomSheet {
         popup.getMenu().add(0, MENU_DUPLICATE, order++, R.string.workspace_item_duplicate);
         popup.getMenu().add(0, MENU_COMPRESS, order++, R.string.workspace_item_compress);
         popup.getMenu().add(0, MENU_RENAME, order++, "Đổi tên");
+        popup.getMenu().add(0, MENU_TOUCH, order++, "Cập nhật thời gian sửa (touch)");
+        if (!item.isDirectory()) {
+            popup.getMenu().add(0, MENU_SHARE, order++, "Chia sẻ / Gửi tệp");
+            popup.getMenu().add(0, MENU_HASH, order++, "Tính mã băm (MD5 / SHA-256)");
+        }
         if (isPreviewableMedia(item)) {
             popup.getMenu().add(0, MENU_PREVIEW, order++, R.string.workspace_item_preview);
         }
@@ -767,6 +876,22 @@ public final class WorkspaceMenuBottomSheet {
                         Toast.makeText(activity, "Không thể đổi tên", Toast.LENGTH_SHORT).show();
                     }
                 });
+                return true;
+            } else if (id == MENU_TOUCH) {
+                if (WorkspaceFileTools.touchNow(item)) {
+                    Toast.makeText(activity, "Đã cập nhật thời gian sửa của \"" + item.getName() + "\"",
+                        Toast.LENGTH_SHORT).show();
+                    reloadDirectory.run();
+                } else {
+                    Toast.makeText(activity, "Không thể cập nhật thời gian sửa (có thể do quyền truy cập)",
+                        Toast.LENGTH_LONG).show();
+                }
+                return true;
+            } else if (id == MENU_SHARE) {
+                WorkspaceFileTools.shareFile(activity, item);
+                return true;
+            } else if (id == MENU_HASH) {
+                WorkspaceFileTools.showHashDialog(activity, item);
                 return true;
             } else if (id == MENU_PREVIEW) {
                 openMediaPreview(activity, item);
@@ -873,7 +998,7 @@ public final class WorkspaceMenuBottomSheet {
                     List<File> matches = new ArrayList<>();
                     collectRecursiveMatches(root, query, matches, cancelled, 0, 500);
                     mMainHandler.post(() -> {
-                        if (activity.isFinishing()) return;
+                        if (activity.isFinishing() || activity.isDestroyed()) return;
                         if (progress.isShowing()) progress.dismiss();
                         if (cancelled.get()) return;
                         if (matches.isEmpty()) {
