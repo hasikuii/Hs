@@ -2,10 +2,13 @@
 package com.termux.app.adb;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.widget.Button;
@@ -84,11 +87,24 @@ public class WirelessAdbActivity extends AppCompatActivity {
 
         mKeyManager = new AdbKeyManager(this, "termux-adb");
 
-        boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+        final boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
         mSdkWarning.setVisibility(supported ? View.GONE : View.VISIBLE);
         mConnectBtn.setEnabled(supported);
-        // Pairing (SPAKE2) is wired in a follow-up PR; keep the button visible but as a placeholder.
+        // Pair button starts disabled; TextWatcher enables it when port + 6-digit code are filled.
         mPairBtn.setEnabled(false);
+
+        TextWatcher pairWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                String port = mPairPort.getText().toString().trim();
+                String code = mPairCode.getText().toString().trim();
+                mPairBtn.setEnabled(supported && !port.isEmpty() && code.length() == 6);
+            }
+        };
+        mPairPort.addTextChangedListener(pairWatcher);
+        mPairCode.addTextChangedListener(pairWatcher);
 
         // Load / generate the adb keypair in background and display fingerprint.
         mExecutor.execute(() -> {
@@ -123,8 +139,36 @@ public class WirelessAdbActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * SPAKE2 pairing (6-digit code) is not yet wired into the APK build.
+     * The crypto core has been verified in offline tests and will ship in
+     * the next update. Until then, show a helpful dialog explaining how to
+     * authorize the ADB key via alternative methods.
+     */
     private void doPair() {
-        Toast.makeText(this, "Ghép nối SPAKE2 sẽ được thêm ở PR tiếp theo. Hiện kết nối hoạt động với khóa đã được adbd ủy quyền (root / tcpip 5555).", Toast.LENGTH_LONG).show();
+        final String fp;
+        try {
+            fp = mKeyManager.getFingerprint();
+        } catch (Exception e) {
+            Toast.makeText(this, "Không đọc được khóa: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Ghép nối không dây (SPAKE2)")
+            .setMessage("Ghép nối bằng mã 6 số đang được hoàn thiện — mã nguồn đã xác thực crypto thành công, sẽ có trong bản cập nhật tiếp theo.\n\n"
+                + "Để kết nối ADB ngay, cần ủy quyền khóa công khai của app với adbd:\n\n"
+                + "Cách 1 — Từ máy tính (không cần root):\n"
+                + "  1. Cắm cáp USB\n"
+                + "  2. Chạy: adb tcpip 5555\n"
+                + "  3. Rút cáp, nhập cổng 5555 rồi bấm KẾT NỐI\n\n"
+                + "Cách 2 — Root:\n"
+                + "  Đẩy khóa vào: /data/misc/adb/adb_keys\n"
+                + "  Sau đó nhập cổng mặc định (5555) rồi KẾT NỐI\n\n"
+                + "Cách 3 — App đã ủy quyền:\n"
+                + "  Dùng Shizuku/LADB nếu đã ghép nối trước đó\n\n"
+                + "Khóa công khai (SHA-256):\n" + fp)
+            .setPositiveButton("Đã hiểu", null)
+            .show();
     }
 
     private void doConnect() {
