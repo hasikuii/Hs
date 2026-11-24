@@ -355,8 +355,6 @@ public class WirelessAdbActivity extends AppCompatActivity {
                     wrapper.setExecutable(true);
                     installed++;
                 }
-                // Also install the `adb` command — different from system command wrappers.
-                // Sends `shell:<args>` so user can run `adb shell id -u` to get 2000.
                 File adbWrapper = new File(binDir, "adb");
                 if (adbWrapper.exists()) {
                     String firstLine = readFirstLine(adbWrapper);
@@ -398,6 +396,11 @@ public class WirelessAdbActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * Builds the `adb` wrapper. Key fix: uses $PREFIX/tmp (derived from $0)
+     * instead of /tmp (which doesn't exist on Android and is not writable
+     * by the app process that runs AdbCommandReceiver).
+     */
     private static String buildAdbWrapperContent(String pkg) {
         String receiver = pkg + "/.app.adb.AdbService$AdbCommandReceiver";
         return "#!/data/data/" + pkg + "/files/usr/bin/sh\n"
@@ -414,7 +417,13 @@ public class WirelessAdbActivity extends AppCompatActivity {
             + "    shift\n"
             + "fi\n"
             + "\n"
-            + "OUTFILE=\"/tmp/adb_out_$$.txt\"\n"
+            + "# Derive $PREFIX from $0: $PREFIX/bin/adb → $PREFIX = dirname(dirname($0))\n"
+            + "# Use $PREFIX/tmp instead of /tmp — /tmp doesn't exist on Android\n"
+            + "# and the app process (AdbCommandReceiver) can't write there.\n"
+            + "PREFIX_DIR=$(cd \"$(dirname \"$0\")/..\" && pwd)\n"
+            + "TMP_DIR=\"$PREFIX_DIR/tmp\"\n"
+            + "mkdir -p \"$TMP_DIR\" 2>/dev/null\n"
+            + "OUTFILE=\"$TMP_DIR/adb_out_$$.txt\"\n"
             + "rm -f \"$OUTFILE\"\n"
             + "\n"
             + "am broadcast -a com.termux.adb.RUN_COMMAND -n '" + receiver + "' \\\n"
@@ -435,17 +444,22 @@ public class WirelessAdbActivity extends AppCompatActivity {
             + "fi\n"
             + "\n"
             + "rm -f \"$OUTFILE\"\n"
-            + "echo \"Lỗi: ADB service chưa chạy. Mở Termux → ADB không dây → KẾT NỐI.\" >&2\n"
+            + "echo \"Lỗi: ADB service chưa chạy hoặc timeout.\" >&2\n"
+            + "echo \"Kiểm tra: Termux app → ADB không dây → đã KẾT NỐI chưa?\" >&2\n"
             + "exit 1\n";
     }
 
+    /** Same /tmp fix applied to system command wrappers. */
     private static String buildWrapperContent(String cmd, String fallback, String pkg) {
         String receiver = pkg + "/.app.adb.AdbService$AdbCommandReceiver";
         return "#!/data/data/" + pkg + "/files/usr/bin/sh\n"
             + "# " + cmd + " — ADB-routed wrapper (UID 2000 when AdbService is running)\n"
             + "# Falls back to " + fallback + " if ADB service is not running.\n"
             + "\n"
-            + "OUTFILE=\"/tmp/adb_out_$$.txt\"\n"
+            + "PREFIX_DIR=$(cd \"$(dirname \"$0\")/..\" && pwd)\n"
+            + "TMP_DIR=\"$PREFIX_DIR/tmp\"\n"
+            + "mkdir -p \"$TMP_DIR\" 2>/dev/null\n"
+            + "OUTFILE=\"$TMP_DIR/adb_out_$$.txt\"\n"
             + "rm -f \"$OUTFILE\"\n"
             + "\n"
             + "am broadcast -a com.termux.adb.RUN_COMMAND -n '" + receiver + "' \\\n"
