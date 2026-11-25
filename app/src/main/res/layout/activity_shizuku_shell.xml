@@ -11,7 +11,7 @@
         android:padding="16dp">
 
         <TextView
-            android:id="+id/shizuku_status"
+            android:id="@+id/shizuku_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Đang kiểm tra Shizuku…"
@@ -19,7 +19,7 @@
             android:paddingBottom="12dp" />
 
         <EditText
-            android:id="+id/shizuku_command"
+            android:id="@+id/shizuku_command"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Nhập lệnh shell (vd: id -u)"
@@ -27,7 +27,7 @@
             android:imeOptions="actionGo" />
 
         <Button
-            android:id="+id/shizuku_run_btn"
+            android:id="@+id/shizuku_run_btn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Chạy"
@@ -40,7 +40,7 @@
             android:paddingTop="8dp">
 
             <Button
-                android:id="+id/shizuku_quick_id"
+                android:id="@+id/shizuku_quick_id"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -49,7 +49,7 @@
                 android:textSize="12sp" />
 
             <Button
-                android:id="+id/shizuku_quick_pm"
+                android:id="@+id/shizuku_quick_pm"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -58,7 +58,7 @@
                 android:textSize="12sp" />
 
             <Button
-                android:id="+id/shizuku_quick_logcat"
+                android:id="@+id/shizuku_quick_logcat"
                 style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -68,7 +68,7 @@
         </LinearLayout>
 
         <TextView
-            android:id="+id/shizuku_output"
+            android:id="@+id/shizuku_output"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="12sp"
