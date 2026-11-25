@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later OR Apache-2.0
 package com.termux.app.adb;
 
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -106,9 +105,8 @@ public class ShizukuShellActivity extends AppCompatActivity {
 
     private boolean hasPermission() {
         try {
-            if (Shizuku.isPreV11()) {
-                return Shizuku.checkSelfPermission();
-            }
+            // checkSelfPermission() returns int (PERMISSION_GRANTED=0 or PERMISSION_DENIED=-1)
+            // in Shizuku API v13.1.5. No isPreV11() branching needed.
             return Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
         } catch (Exception e) {
             return false;
