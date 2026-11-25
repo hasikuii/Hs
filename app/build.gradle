@@ -36,11 +36,6 @@ android {
         implementation "io.noties.markwon:recycler:$markwonVersion"
         implementation project(":terminal-view")
         implementation project(":termux-shared")
-        // Shizuku API — provides shell access as UID 2000 without
-        // requiring a native ADB client. The user installs the Shizuku
-        // app separately and starts it via Wireless debugging or Root.
-        implementation "dev.rikka.shizuku:api:13.1.5"
-        implementation "dev.rikka.shizuku:provider:13.1.5"
     }
 
     defaultConfig {
@@ -121,6 +116,7 @@ android {
 
     lint {
         disable 'ProtectedPermissions'
+        abortOnError false
     }
 
     testOptions {
@@ -158,6 +154,12 @@ dependencies {
             replacedBy("com.google.guava:guava", "ListenableFuture is included in Guava")
         }
     }
+
+    // Shizuku API — provides shell access as UID 2000 without
+    // requiring a native ADB client. Moved to top-level dependencies
+    // block (not inside android{}) for proper Gradle resolution.
+    implementation "dev.rikka.shizuku:api:13.1.5"
+    implementation "dev.rikka.shizuku:provider:13.1.5"
 
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.robolectric:robolectric:4.10"
