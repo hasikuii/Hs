@@ -19,10 +19,13 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.termux.R;
 
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 
-import rikka.shizuku.Shizuku;
-
+/**
+ * Shell console via Shizuku. Uses reflection to call Shizuku API methods
+ * to avoid compile-time dependency issues with specific API versions.
+ */
 public class ShizukuShellActivity extends AppCompatActivity {
 
     private static final int REQUEST_PERMISSION = 0x5A01;
@@ -72,10 +75,9 @@ public class ShizukuShellActivity extends AppCompatActivity {
             });
             return;
         }
-
         mStatusText.setOnClickListener(null);
 
-        if (!Shizuku.pingBinder()) {
+        if (!shizukuPingBinder()) {
             mStatusText.setText("Shizuku chưa chạy. Mở app Shizuku → Start.");
             mRunBtn.setEnabled(false);
             return;
@@ -84,9 +86,7 @@ public class ShizukuShellActivity extends AppCompatActivity {
         if (!hasPermission()) {
             mStatusText.setText("Shizuku chạy nhưng chưa cấp quyền. Đang yêu cầu…");
             mRunBtn.setEnabled(false);
-            try {
-                Shizuku.requestPermission(REQUEST_PERMISSION);
-            } catch (Exception ignored) {}
+            shizukuRequestPermission(REQUEST_PERMISSION);
             return;
         }
 
@@ -103,15 +103,67 @@ public class ShizukuShellActivity extends AppCompatActivity {
         }
     }
 
-    private boolean hasPermission() {
+    // --- Shizuku API via reflection (avoids compile-time method signature issues) ---
+
+    private Class<?> getShizukuClass() {
         try {
-            // checkSelfPermission() returns int (PERMISSION_GRANTED=0 or PERMISSION_DENIED=-1)
-            // in Shizuku API v13.1.5. No isPreV11() branching needed.
-            return Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
+            return Class.forName("rikka.shizuku.Shizuku");
+        } catch (ClassNotFoundException e) {
+            return null;
+        }
+    }
+
+    private boolean shizukuPingBinder() {
+        try {
+            Class<?> cls = getShizukuClass();
+            if (cls == null) return false;
+            Method m = cls.getMethod("pingBinder");
+            Object result = m.invoke(null);
+            return Boolean.TRUE.equals(result);
         } catch (Exception e) {
             return false;
         }
     }
+
+    private boolean hasPermission() {
+        try {
+            Class<?> cls = getShizukuClass();
+            if (cls == null) return false;
+            Method m = cls.getMethod("checkSelfPermission");
+            Object result = m.invoke(null);
+            if (result instanceof Integer) {
+                return (Integer) result == PackageManager.PERMISSION_GRANTED;
+            }
+            if (result instanceof Boolean) {
+                return (Boolean) result;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void shizukuRequestPermission(int requestCode) {
+        try {
+            Class<?> cls = getShizukuClass();
+            if (cls == null) return;
+            Method m = cls.getMethod("requestPermission", int.class);
+            m.invoke(null, requestCode);
+        } catch (Exception ignored) {}
+    }
+
+    private Process shizukuNewProcess(String[] cmd, String[] env, String dir) {
+        try {
+            Class<?> cls = getShizukuClass();
+            if (cls == null) return null;
+            Method m = cls.getMethod("newProcess", String[].class, String[].class, String.class);
+            return (Process) m.invoke(null, cmd, env, dir);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // --- Shell command execution ---
 
     private void appendOutput(final String text) {
         mMain.post(() -> mOutput.append(text));
@@ -130,8 +182,13 @@ public class ShizukuShellActivity extends AppCompatActivity {
 
         new Thread(() -> {
             try {
-                Process process = Shizuku.newProcess(
+                Process process = shizukuNewProcess(
                     new String[]{"sh", "-c", cmd}, null, null);
+
+                if (process == null) {
+                    appendOutput("Lỗi: Không thể tạo process qua Shizuku.\n");
+                    return;
+                }
 
                 InputStream is = process.getInputStream();
                 InputStream es = process.getErrorStream();
