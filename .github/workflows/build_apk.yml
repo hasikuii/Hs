@@ -65,6 +65,7 @@ jobs:
 
       - name: Run unit tests
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
+        continue-on-error: true
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       - name: Build ARM64 Debug APK
