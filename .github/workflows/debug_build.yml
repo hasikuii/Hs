@@ -92,7 +92,7 @@ jobs:
           (cd "$APK_DIR_PATH" && sha256sum "$APK_OUTPUT_NAME" > "${APK_BASENAME_PREFIX}_sha256sums")
 
       - name: Attach arm64-v8a APK file
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.APK_BASENAME_PREFIX }}_arm64-v8a
           path: |
